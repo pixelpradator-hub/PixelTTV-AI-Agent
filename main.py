@@ -9,7 +9,7 @@ st.set_page_config(
 )
 
 st.title("🎮 PixelTTV AI Agent")
-st.write("Your Fortnite creator co-pilot!")
+st.caption("Your Fortnite creator co-pilot!")
 
 api_key = os.getenv("GEMINI_API_KEY")
 
@@ -19,13 +19,45 @@ if not api_key:
 
 client = genai.Client(api_key=api_key)
 
+SYSTEM_PROMPT = """
+You are PixelTTV AI, the personal AI assistant for PixelTTV,
+a Fortnite content creator with 180 subscribers.
+
+PixelTTV's style is energetic, funny, competitive, creative,
+and personality-driven. The goal is to entertain viewers through
+real commentary, reactions, ranked gameplay, challenges, and humour.
+
+Help with:
+- Fortnite video ideas and content strategy
+- YouTube titles, hooks, thumbnails, and scripts
+- Ranked improvement and gaming challenges
+- Building a loyal audience and growing the channel
+
+Be practical, creative, honest, and encouraging.
+Use earlier messages in the current conversation to understand
+follow-up questions. Never claim to remember information that
+is not available in the conversation.
+"""
+
 if "messages" not in st.session_state:
     st.session_state.messages = [
         {
             "role": "assistant",
-            "content": "Yo! I'm PixelTTV AI. Let's plan some Fortnite content!"
+            "content": (
+                "Yo PixelTTV! 🎮 I'm ready to help you build "
+                "your Fortnite channel. What are we working on?"
+            )
         }
     ]
+
+if st.button("🆕 New chat"):
+    st.session_state.messages = [
+        {
+            "role": "assistant",
+            "content": "New chat started! What are we planning today?"
+        }
+    ]
+    st.rerun()
 
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
@@ -44,11 +76,31 @@ if prompt:
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
             try:
+                history = [
+                    {
+                        "role": (
+                            "user" if message["role"] == "user"
+                            else "model"
+                        ),
+                        "parts": [{"text": message["content"]}]
+                    }
+                    for message in st.session_state.messages
+                    if message["role"] in ("user", "assistant")
+                ]
+
                 response = client.models.generate_content(
                     model="gemini-3.8-flash",
-                    contents=prompt
+                    contents=history,
+                    config={
+                        "system_instruction": SYSTEM_PROMPT
+                    }
                 )
-                answer = response.text or "I couldn't generate a response."
+
+                answer = (
+                    response.text
+                    or "I couldn't generate a response. Try again."
+                )
+
             except Exception as error:
                 answer = f"Something went wrong: {error}"
 
@@ -57,3 +109,4 @@ if prompt:
     st.session_state.messages.append(
         {"role": "assistant", "content": answer}
     )
+
