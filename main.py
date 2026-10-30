@@ -1,259 +1,162 @@
 
-
 import os
 import base64
 import tempfile
 import streamlit as st
 from google import genai
 
-
-# ==================================================
-# PIXEL AI
-# ==================================================
+# ==========================================
+# AURA - PERSONAL AI ASSISTANT
+# ==========================================
 
 st.set_page_config(
-    page_title="Pixel AI",
-    page_icon="🤖",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    page_title="Aura AI",
+    page_icon="✨",
+    layout="wide"
 )
 
-
-# ==================================================
-# MODEL SETTINGS
-# ==================================================
-
+# Models
 CHAT_MODEL = "gemini-3.5-flash-lite"
 TRANSCRIPTION_MODEL = "gemini-3.5-transcribe"
 VOICE_MODEL = "gemini-3.8-flash-tts"
 
-
-# ==================================================
-# PIXEL AI PERSONALITY
-# ==================================================
-
+# Aura's personality
 SYSTEM_PROMPT = """
-You are Pixel AI, an intelligent, all-purpose personal
-AI assistant.
+You are Aura, an advanced personal AI assistant.
 
-YOUR IDENTITY:
-You are a versatile assistant capable of helping with
-almost any subject or task.
+IDENTITY:
+Your name is Aura.
+You are an intelligent, capable, sophisticated personal assistant.
+You communicate naturally and confidently.
 
-YOUR PERSONALITY:
-- Calm, friendly, intelligent and approachable.
-- Natural and conversational.
-- Helpful, thoughtful and clear.
-- Patient when explaining difficult subjects.
-- Adapt your tone to the user's needs.
-- Avoid repetitive or robotic responses.
+PERSONALITY:
+- Calm, intelligent and composed.
+- Professional without sounding robotic.
+- Friendly without being overly casual.
+- Confident without being arrogant.
+- Occasionally witty when appropriate.
+- Clear, articulate and thoughtful.
 
-YOUR CAPABILITIES:
+COMMUNICATION:
+- Give useful, direct answers.
+- Explain complicated things in understandable language.
+- Avoid unnecessary long introductions.
+- Do not constantly repeat the user's name.
+- Do not overuse phrases like "How may I assist you?"
+- Never pretend to have performed an action you haven't performed.
 
-1. GENERAL KNOWLEDGE
-Answer everyday questions and explain concepts
-across a wide range of subjects.
+CAPABILITIES:
+You can help with education, research, writing, creativity,
+coding, technology, planning, productivity and everyday questions.
 
-2. EDUCATION
-Help with maths, science, languages, history,
-technology and other school subjects.
-Explain answers step by step when useful.
+PERSONAL CONTEXT:
+The user runs a creator project called PixelTTV.
+You may help with Fortnite and content creation when relevant.
+However, never assume every conversation is about Fortnite
+or YouTube.
 
-3. WRITING AND CREATIVITY
-Help write, edit, brainstorm and improve stories,
-messages, scripts, presentations and ideas.
-
-4. CODING AND TECHNOLOGY
-Write code, explain programming, troubleshoot errors
-and help with technical projects.
-
-5. PLANNING AND PRODUCTIVITY
-Help organise tasks, create plans, set goals
-and manage projects.
-
-6. NATURAL CONVERSATION
-Have meaningful conversations and respond naturally
-to what the user actually says.
-
-7. PERSONAL INTERESTS
-Help with gaming, Fortnite, YouTube, PixelTTV
-and other interests when the user brings them up.
-
-IMPORTANT RULES:
-- You are a general-purpose assistant first.
-- Never assume every conversation is about Fortnite,
-  YouTube or content creation.
-- Do not repeatedly bring up old projects.
-- Do not force unrelated topics into conversations.
-- Answer the user's actual question.
-- Explain difficult topics simply.
-- Never invent facts or pretend to have capabilities
-  you do not have.
-- Be honest when you are uncertain.
-- Do not pretend to remember conversations that are
-  not included in the current context.
-- Keep answers useful and appropriately detailed.
+IMPORTANT:
+You are Aura. Never call yourself Pixel AI.
+Do not claim to be the fictional character Jarvis.
 """
 
+# Aura's original voice direction
+AURA_VOICE_STYLE = """
+Speak as a sophisticated, cinematic personal AI assistant.
+Use a refined British English accent.
+Use a mature, masculine-sounding, medium-low register.
+Speak calmly, confidently and clearly.
+Use precise pronunciation and natural British articulation.
+Maintain a measured, unhurried pace.
+Sound intelligent, professional and subtly warm.
+Avoid an overly cheerful, childish, exaggerated or robotic delivery.
+Sound like a polished high-end digital assistant.
+"""
 
-# ==================================================
+AURA_VOICE = "Orus"
+
+
+# ==========================================
 # API CONNECTION
-# ==================================================
+# ==========================================
 
-def get_api_key():
-    try:
-        return st.secrets.get("GEMINI_API_KEY")
-    except Exception:
-        return os.getenv("GEMINI_API_KEY")
-
-
-API_KEY = get_api_key()
+API_KEY = st.secrets.get(
+    "GEMINI_API_KEY",
+    os.getenv("GEMINI_API_KEY")
+)
 
 if not API_KEY:
-    st.error(
-        "Pixel AI needs its Gemini API key. "
-        "Add GEMINI_API_KEY in Streamlit Secrets."
-    )
+    st.error("Aura's API key has not been configured.")
     st.stop()
 
 client = genai.Client(api_key=API_KEY)
 
 
-# ==================================================
-# SESSION MEMORY
-# ==================================================
+# ==========================================
+# SESSION STATE
+# ==========================================
 
 if "messages" not in st.session_state:
-    st.session_state.messages = [
-        {
-            "role": "assistant",
-            "content": (
-                "Hello! I'm Pixel AI. "
-                "I'm your personal AI assistant. "
-                "You can ask me questions, learn something, "
-                "work on projects, brainstorm ideas or just chat. "
-                "What would you like to do?"
-            ),
-            "audio": None
-        }
-    ]
+    st.session_state.messages = []
 
 if "continuity_report" not in st.session_state:
     st.session_state.continuity_report = ""
 
+if "spoken_replies" not in st.session_state:
+    st.session_state.spoken_replies = True
 
-# ==================================================
-# GENERATE CHAT RESPONSE
-# ==================================================
+
+# ==========================================
+# CHAT RESPONSE
+# ==========================================
 
 def get_ai_response():
 
-    history = []
+    history = st.session_state.messages[-30:]
 
-    for message in st.session_state.messages[-30:]:
+    conversation = ""
 
-        role = (
-            "model"
-            if message["role"] == "assistant"
-            else "user"
-        )
-
-        history.append({
-            "role": role,
-            "parts": [
-                {"text": message["content"]}
-            ]
-        })
+    for message in history:
+        role = "User" if message["role"] == "user" else "Aura"
+        conversation += f"{role}: {message['content']}\n\n"
 
     response = client.models.generate_content(
         model=CHAT_MODEL,
-        contents=history,
+        contents=conversation,
         config={
             "system_instruction": SYSTEM_PROMPT
         }
     )
 
-    if not response.text:
-        raise ValueError("Pixel AI returned an empty response.")
-
-    return response.text.strip()
+    return response.text
 
 
-# ==================================================
-# VOICE NOTE TRANSCRIPTION
-# ==================================================
-
-def transcribe_voice_note(audio_upload):
-
-    temporary_path = None
-
-    try:
-
-        audio_bytes = audio_upload.getvalue()
-
-        with tempfile.NamedTemporaryFile(
-            suffix=".wav",
-            delete=False
-        ) as temporary_file:
-
-            temporary_file.write(audio_bytes)
-            temporary_path = temporary_file.name
-
-        uploaded_audio = client.files.upload(
-            file=temporary_path
-        )
-
-        transcription = client.interactions.create(
-            model=TRANSCRIPTION_MODEL,
-            input=[
-                {
-                    "type": "audio",
-                    "uri": uploaded_audio.uri,
-                    "mime_type": uploaded_audio.mime_type
-                }
-            ]
-        )
-
-        return (
-            transcription.output_text or ""
-        ).strip()
-
-    finally:
-
-        if (
-            temporary_path
-            and os.path.exists(temporary_path)
-        ):
-            os.remove(temporary_path)
-
-
-# ==================================================
-# GENERATE SPOKEN REPLY
-# ==================================================
+# ==========================================
+# VOICE GENERATION
+# ==========================================
 
 def generate_voice_reply(text):
 
     interaction = client.interactions.create(
         model=VOICE_MODEL,
-        input=[
-            {
-                "type": "user_input",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": text
-                    }
-                ]
-            }
-        ],
+        input=[{
+            "type": "user_input",
+            "content": [{
+                "type": "text",
+                "text": text,
+                "annotations": [{
+                    "type": "speech_metadata",
+                    "style": AURA_VOICE_STYLE
+                }]
+            }]
+        }],
         response_format={
-            "type": "audio"
+            "type": "audio",
+            "mime_type": "audio/wav"
         },
         generation_config={
             "speech_config": [
-                {
-                    "voice": "Kore"
-                }
+                {"voice": AURA_VOICE}
             ]
         }
     )
@@ -261,308 +164,281 @@ def generate_voice_reply(text):
     if not interaction.output_audio:
         return None
 
-    audio_data = interaction.output_audio.data
-
-    if not audio_data:
-        return None
-
-    return base64.b64decode(audio_data)
+    return base64.b64decode(
+        interaction.output_audio.data
+    )
 
 
-# ==================================================
-# PROCESS MESSAGE
-# ==================================================
+# ==========================================
+# VOICE NOTE TRANSCRIPTION
+# ==========================================
 
-def process_message(user_text, speak_reply=True):
+def transcribe_voice_note(audio_file):
 
-    user_text = user_text.strip()
+    suffix = ".wav"
 
-    if not user_text:
+    with tempfile.NamedTemporaryFile(
+        delete=False,
+        suffix=suffix
+    ) as temporary_file:
+
+        temporary_file.write(audio_file.getvalue())
+        temporary_path = temporary_file.name
+
+    try:
+        uploaded_file = client.files.upload(
+            file=temporary_path
+        )
+
+        interaction = client.interactions.create(
+            model=TRANSCRIPTION_MODEL,
+            input=[
+                {
+                    "type": "text",
+                    "text": "Transcribe the spoken words accurately. Return only the transcript."
+                },
+                {
+                    "type": "audio",
+                    "uri": uploaded_file.uri,
+                    "mime_type": uploaded_file.mime_type
+                }
+            ]
+        )
+
+        return interaction.output_text.strip()
+
+    finally:
+        if os.path.exists(temporary_path):
+            os.remove(temporary_path)
+
+
+# ==========================================
+# MESSAGE PROCESSING
+# ==========================================
+
+def process_message(user_text):
+
+    if not user_text or not user_text.strip():
         return
 
     st.session_state.messages.append({
         "role": "user",
-        "content": user_text,
-        "audio": None
+        "content": user_text
     })
 
     try:
 
-        with st.spinner("Pixel AI is thinking..."):
+        with st.spinner("Aura is thinking..."):
             answer = get_ai_response()
-
-        audio_reply = None
-
-        if speak_reply:
-
-            try:
-
-                with st.spinner("Pixel AI is preparing its voice..."):
-                    audio_reply = generate_voice_reply(answer)
-
-            except Exception:
-                st.warning(
-                    "Pixel AI answered successfully, "
-                    "but its voice reply was unavailable."
-                )
 
         st.session_state.messages.append({
             "role": "assistant",
-            "content": answer,
-            "audio": audio_reply
+            "content": answer
         })
+
+        if st.session_state.spoken_replies:
+
+            try:
+                with st.spinner("Aura is preparing a response..."):
+                    audio = generate_voice_reply(answer)
+
+                if audio:
+                    st.session_state.last_audio = audio
+
+            except Exception as voice_error:
+                st.session_state.last_audio = None
+                st.warning(
+                    f"Text response is ready, but voice generation failed: {voice_error}"
+                )
 
     except Exception as error:
 
-        st.session_state.messages.append({
-            "role": "assistant",
-            "content": (
-                "Sorry, something went wrong while "
-                f"processing your message.\n\nError: {error}"
-            ),
-            "audio": None
-        })
+        st.error(f"Aura encountered an error: {error}")
 
 
-# ==================================================
+# ==========================================
 # CONTINUITY REPORT
-# ==================================================
+# ==========================================
 
 def create_continuity_report():
 
-    conversation = "\n\n".join(
-        f"{message['role'].upper()}: {message['content']}"
-        for message in st.session_state.messages
-    )
+    if not st.session_state.messages:
+        return "There is no conversation to summarise yet."
 
-    report_prompt = """
-Create a detailed continuity report for a future
-Pixel AI conversation.
+    conversation = ""
 
-Include:
-- Important information shared by the user.
-- Preferences and communication style.
-- Current projects and progress.
-- Important decisions.
-- Unfinished tasks.
-- Relevant conversation context.
-- Suggested next steps.
+    for message in st.session_state.messages:
+        role = message["role"]
+        conversation += f"{role}: {message['content']}\n\n"
 
-Do not invent information.
-Do not treat one-time topics as permanent interests.
-Make the report self-contained and easy to copy.
-"""
+    prompt = f"""
+    Create a useful continuity report for Aura.
 
-    result = client.models.generate_content(
+    Summarise:
+    - Important information from the conversation.
+    - Decisions made.
+    - Projects discussed.
+    - Preferences and instructions.
+    - Unfinished tasks.
+    - Important details Aura should know when the conversation resumes.
+
+    Do not invent information.
+
+    Conversation:
+    {conversation}
+    """
+
+    response = client.models.generate_content(
         model=CHAT_MODEL,
-        contents=report_prompt + "\n\n" + conversation,
-        config={
-            "system_instruction": SYSTEM_PROMPT
-        }
+        contents=prompt
     )
 
-    return result.text or "No report was generated."
+    return response.text
 
 
-# ==================================================
+# ==========================================
 # SIDEBAR
-# ==================================================
+# ==========================================
 
 with st.sidebar:
 
-    st.title("🤖 Pixel AI")
+    st.title("✨ AURA")
+
     st.caption("Your personal AI assistant")
 
     st.divider()
 
-    speak_replies = st.toggle(
-        "🔊 Voice replies",
-        value=True
+    st.session_state.spoken_replies = st.toggle(
+        "Spoken replies",
+        value=st.session_state.spoken_replies
     )
-
-    st.caption("Voice style: Calm")
 
     st.divider()
 
-    if st.button(
-        "➕ New Chat",
-        use_container_width=True
-    ):
+    if st.button("＋ New Chat", use_container_width=True):
 
-        st.session_state.messages = [
-            {
-                "role": "assistant",
-                "content": (
-                    "New conversation started! "
-                    "What would you like to talk about?"
-                ),
-                "audio": None
-            }
-        ]
-
+        st.session_state.messages = []
         st.session_state.continuity_report = ""
+        st.session_state.last_audio = None
 
         st.rerun()
 
     if st.button(
-        "📋 Create Continuity Report",
+        "Create Continuity Report",
         use_container_width=True
     ):
 
-        try:
+        with st.spinner("Creating report..."):
+            st.session_state.continuity_report = (
+                create_continuity_report()
+            )
 
-            with st.spinner("Creating your report..."):
-                st.session_state.continuity_report = (
-                    create_continuity_report()
-                )
+    if st.session_state.continuity_report:
 
-            st.success("Your report is ready!")
+        st.divider()
 
-        except Exception as error:
-            st.error(f"Report error: {error}")
+        st.subheader("Continuity Report")
 
-    st.divider()
+        st.write(st.session_state.continuity_report)
 
-    st.caption("Powered by Google Gemini")
+        st.download_button(
+            "Download Report",
+            data=st.session_state.continuity_report,
+            file_name="aura_continuity_report.txt",
+            mime="text/plain",
+            use_container_width=True
+        )
 
 
-# ==================================================
-# MAIN CHAT INTERFACE
-# ==================================================
+# ==========================================
+# MAIN INTERFACE
+# ==========================================
 
-st.title("🤖 Pixel AI")
+st.title("✨ Aura")
 
-st.caption(
-    "Ask anything. Learn, create, explore and get things done."
-)
+st.caption("Your personal AI. Always ready to help.")
 
 st.divider()
 
+if not st.session_state.messages:
 
-# ==================================================
-# CHAT HISTORY
-# ==================================================
+    st.markdown("### Good evening. I'm Aura.")
 
-for message in st.session_state.messages:
+    st.write(
+        "I'm ready whenever you are. "
+        "What would you like to work on?"
+    )
 
-    with st.chat_message(message["role"]):
+
+# Display conversation
+
+for index, message in enumerate(st.session_state.messages):
+
+    with st.chat_message(
+        message["role"],
+        avatar="✨" if message["role"] == "assistant" else "👤"
+    ):
 
         st.markdown(message["content"])
 
-        if message.get("audio"):
+        if (
+            message["role"] == "assistant"
+            and index == len(st.session_state.messages) - 1
+            and st.session_state.get("last_audio")
+        ):
 
             st.audio(
-                message["audio"],
+                st.session_state.last_audio,
                 format="audio/wav"
             )
 
 
-# ==================================================
-# VOICE NOTES
-# ==================================================
-
-with st.expander("🎙️ Talk to Pixel AI"):
-
-    st.write(
-        "Record a voice message and Pixel AI will "
-        "transcribe it and respond."
-    )
-
-    audio_upload = st.audio_input(
-        "Record your voice message",
-        sample_rate=16000
-    )
-
-    if st.button(
-        "Send Voice Message",
-        use_container_width=True
-    ):
-
-        if audio_upload is None:
-
-            st.warning("Please record a message first.")
-
-        else:
-
-            try:
-
-                with st.spinner("Understanding your voice..."):
-                    transcript = transcribe_voice_note(audio_upload)
-
-                if transcript:
-
-                    st.info("**You said:** " + transcript)
-
-                    process_message(
-                        transcript,
-                        speak_reply=speak_replies
-                    )
-
-                    st.rerun()
-
-                else:
-
-                    st.warning(
-                        "I couldn't detect any speech. "
-                        "Please try recording again."
-                    )
-
-            except Exception as error:
-
-                st.error(f"Voice note error: {error}")
-
-
-# ==================================================
-# NORMAL CHATBOX
-# ==================================================
-
-prompt = st.chat_input(
-    "Message Pixel AI..."
-)
-
-if prompt:
-
-    process_message(
-        prompt,
-        speak_reply=speak_replies
-    )
-
-    st.rerun()
-
-
-# ==================================================
-# CONTINUITY REPORT DISPLAY
-# ==================================================
-
-if st.session_state.continuity_report:
-
-    st.divider()
-
-    st.subheader("📋 Continuity Report")
-
-    st.text_area(
-        "Your report",
-        value=st.session_state.continuity_report,
-        height=350
-    )
-
-    st.download_button(
-        "⬇️ Download Continuity Report",
-        data=st.session_state.continuity_report,
-        file_name="pixel_ai_continuity_report.txt",
-        mime="text/plain",
-        use_container_width=True
-    )
-
-
-# ==================================================
-# FOOTER
-# ==================================================
+# ==========================================
+# VOICE NOTE INPUT
+# ==========================================
 
 st.divider()
 
-st.caption(
-    "Pixel AI • Your personal assistant for learning, "
-    "creating, exploring and getting things done."
-)
+st.subheader("Voice input")
 
+audio_file = st.audio_input("Record a message")
+
+if audio_file:
+
+    if st.button("Send voice message"):
+
+        try:
+
+            with st.spinner("Aura is listening..."):
+
+                transcript = transcribe_voice_note(audio_file)
+
+            if transcript:
+
+                st.success("Voice message transcribed.")
+
+                process_message(transcript)
+
+                st.rerun()
+
+            else:
+                st.warning("No speech was detected.")
+
+        except Exception as error:
+
+            st.error(f"Voice input failed: {error}")
+
+
+# ==========================================
+# TEXT CHAT
+# ==========================================
+
+user_input = st.chat_input("Message Aura...")
+
+if user_input:
+
+    st.session_state.last_audio = None
+
+    process_message(user_input)
+
+    st.rerun()
