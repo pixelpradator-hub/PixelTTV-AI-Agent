@@ -3,6 +3,8 @@ import os
 import json
 import uuid
 import hashlib
+import base64
+import re
 from pathlib import Path
 from datetime import datetime
 
@@ -24,13 +26,16 @@ st.set_page_config(
 )
 
 CHAT_MODEL = "gemini-3.5-flash-lite"
+TTS_MODEL = "gemini-3.8-flash-tts"
 MEMORY_MODEL = "gemini-3.5-flash-lite"
+
+AURA_VOICE = "Algieba"
 
 DATA_FILE = Path(__file__).parent / "aura_data.json"
 
 MAX_HISTORY = 20
-MEMORY_INTERVAL = 4
 MAX_MEMORIES = 100
+MEMORY_INTERVAL = 4
 
 
 # =========================================================
@@ -331,8 +336,8 @@ You are AURA, a sophisticated personal AI assistant.
 IDENTITY:
 - You are male. Use he/him pronouns when referring to yourself.
 - You have your own original identity.
-- You are inspired by the experience of a futuristic personal
-  assistant, but you are not a fictional character.
+- You are inspired by futuristic personal assistants,
+  but you are not a fictional character.
 
 PERSONALITY:
 - Intelligent, composed, confident and articulate.
@@ -347,10 +352,10 @@ PERSONALITY:
 - Avoid unnecessary motivational speeches.
 
 VOICE:
-- Your intended voice identity is mature, masculine and refined.
-- Your intended accent is British English.
-- Write naturally for spoken conversation.
-- Avoid excessive formatting in ordinary spoken replies.
+- Your intended voice is mature, masculine and refined.
+- Keep responses natural and easy to speak aloud.
+- Use clear, conversational English.
+- Avoid excessive formatting in ordinary conversation.
 
 GENERAL ASSISTANCE:
 You are an all-purpose assistant.
@@ -358,8 +363,8 @@ Help with schoolwork, technology, programming, research,
 planning, problem-solving and everyday questions.
 
 PIXELTTV MODE:
-Only activate creator-focused assistance when the user brings
-up PixelTTV, Fortnite, YouTube or content creation.
+Only activate creator-focused assistance when the user
+brings up PixelTTV, Fortnite, YouTube or content creation.
 When relevant, act as an invested creator co-pilot.
 Do not force Fortnite or PixelTTV into unrelated conversations.
 
@@ -391,11 +396,6 @@ def memory_context():
 
 
 def extract_memories(chat):
-    """
-    Extract useful long-term information periodically.
-    This avoids an additional Gemini request after every message.
-    """
-
     recent_messages = chat.get("messages", [])[-12:]
 
     conversation = "\n".join(
@@ -485,16 +485,14 @@ CONVERSATION:
             else "AURA"
         )
 
-        prompt += (
-            f"\n{role}: {message['content']}\n"
-        )
+        prompt += f"\n{role}: {message['content']}\n"
 
     prompt += "\nAURA:"
     return prompt
 
 
 # =========================================================
-# GENERATE RESPONSE
+# GENERATE TEXT RESPONSE
 # =========================================================
 
 def generate_response(chat, placeholder):
@@ -538,6 +536,122 @@ def generate_response(chat, placeholder):
 
 
 # =========================================================
+# PREPARE TEXT FOR SPEECH
+# =========================================================
+
+def prepare_for_speech(text):
+    """
+    Remove markdown formatting and large code blocks
+    before sending the response to the TTS model.
+    """
+
+    text = re.sub(
+        r"```.*?```",
+        " I have included a code block in my written response.",
+        text,
+        flags=re.DOTALL
+    )
+
+    text = re.sub(
+        r"\[([^\]]+)\]\([^)]+\)",
+        r"\1",
+        text
+    )
+
+    text = re.sub(r"`([^`]+)`", r"\1", text)
+    text = re.sub(r"#{1,6}\s*", "", text)
+    text = re.sub(r"\*\*(.*?)\*\*", r"\1", text)
+    text = re.sub(r"\*(.*?)\*", r"\1", text)
+    text = re.sub(r"~~(.*?)~~", r"\1", text)
+
+    text = re.sub(
+        r"https?://\S+",
+        "link",
+        text
+    )
+
+    return text.strip()
+
+
+# =========================================================
+# GEMINI 3.8 FLASH TTS
+# =========================================================
+
+def generate_speech(text):
+    """
+    Generate natural speech using Gemini 3.8 Flash TTS.
+
+    Voice: Algieba
+    Accent direction: Neutral English
+    """
+
+    speech_text = prepare_for_speech(text)
+
+    if not speech_text:
+        return None
+
+    try:
+        interaction = client.interactions.create(
+            model=TTS_MODEL,
+
+            input=[
+                {
+                    "type": "user_input",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": speech_text,
+                            "annotations": [
+                                {
+                                    "type": "speech_metadata",
+                                    "style": (
+                                        "Speak in clear, neutral English "
+                                        "with no strong regional accent. "
+                                        "Use a mature, smooth, composed, "
+                                        "confident and articulate delivery. "
+                                        "Speak at a natural, measured pace "
+                                        "with subtle pauses between ideas. "
+                                        "Sound conversational and refined, "
+                                        "not robotic or exaggerated."
+                                    )
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ],
+
+            response_format={
+                "type": "audio"
+            },
+
+            generation_config={
+                "speech_config": [
+                    {
+                        "voice": AURA_VOICE
+                    }
+                ]
+            }
+        )
+
+        audio_data = interaction.output_audio.data
+
+        if not audio_data:
+            return None
+
+        return base64.b64decode(audio_data)
+
+    except Exception as error:
+        st.warning(
+            "Aura's text response worked, but his voice "
+            "could not be generated this time."
+        )
+
+        st.caption(f"Voice error: {error}")
+        return None
+
+
+# =========================================================
 # VOICE INPUT — MICROPHONE
 # =========================================================
 
@@ -572,81 +686,6 @@ def transcribe_audio(audio_file):
 
 
 # =========================================================
-# VOICE OUTPUT — AUTOMATIC SPEECH
-# =========================================================
-
-def speak_response(text):
-    """
-    Use the browser's available speech synthesis voices.
-    Prefer British English voices where available.
-    """
-
-    safe_text = json.dumps(text).replace("<", "\\u003c")
-
-    speech_html = f"""
-    <html>
-    <body>
-    <script>
-    const message = {safe_text};
-
-    function speakAura() {{
-        if (!("speechSynthesis" in window)) return;
-
-        window.speechSynthesis.cancel();
-
-        const utterance = new SpeechSynthesisUtterance(message);
-        const voices = window.speechSynthesis.getVoices();
-
-        const britishVoices = voices.filter(v =>
-            v.lang && v.lang.toLowerCase().startsWith("en-gb")
-        );
-
-        const preferredNames = [
-            "daniel", "george", "arthur",
-            "oliver", "ryan", "alfie"
-        ];
-
-        let selectedVoice = null;
-
-        for (const name of preferredNames) {{
-            selectedVoice = britishVoices.find(v =>
-                v.name.toLowerCase().includes(name)
-            );
-
-            if (selectedVoice) break;
-        }}
-
-        if (!selectedVoice && britishVoices.length > 0) {{
-            selectedVoice = britishVoices[0];
-        }}
-
-        if (selectedVoice) {{
-            utterance.voice = selectedVoice;
-        }}
-
-        utterance.lang = "en-GB";
-        utterance.rate = 0.94;
-        utterance.pitch = 0.88;
-        utterance.volume = 1;
-
-        window.speechSynthesis.speak(utterance);
-    }}
-
-    if (window.speechSynthesis.getVoices().length > 0) {{
-        speakAura();
-    }} else {{
-        window.speechSynthesis.onvoiceschanged = speakAura;
-        setTimeout(speakAura, 700);
-    }}
-    </script>
-    </body>
-    </html>
-    """
-
-    components.html(speech_html, height=0)
-
-
-# =========================================================
 # SEND MESSAGE
 # =========================================================
 
@@ -658,14 +697,12 @@ def send_message(user_text, is_voice=False):
 
     chat = get_active_chat()
 
-    user_message = {
+    chat["messages"].append({
         "role": "user",
         "content": user_text,
         "timestamp": datetime.now().isoformat(),
         "source": "voice" if is_voice else "text"
-    }
-
-    chat["messages"].append(user_message)
+    })
 
     if chat["title"] == "New conversation":
         chat["title"] = user_text[:38]
@@ -686,20 +723,33 @@ def send_message(user_text, is_voice=False):
         avatar="🤖"
     ):
         placeholder = st.empty()
+
         answer = generate_response(chat, placeholder)
 
-    if answer is None:
-        chat["messages"].pop()
+        if answer is None:
+            chat["messages"].pop()
+            save_data()
+            return
+
+        chat["messages"].append({
+            "role": "assistant",
+            "content": answer,
+            "timestamp": datetime.now().isoformat()
+        })
+
         save_data()
-        return
 
-    chat["messages"].append({
-        "role": "assistant",
-        "content": answer,
-        "timestamp": datetime.now().isoformat()
-    })
+        # Generate and play Aura's natural voice.
+        if st.session_state.voice_enabled:
+            with st.spinner("Aura is preparing his voice..."):
+                audio_bytes = generate_speech(answer)
 
-    save_data()
+            if audio_bytes:
+                st.audio(
+                    audio_bytes,
+                    format="audio/wav",
+                    autoplay=True
+                )
 
     # Extract memories periodically.
     user_message_count = sum(
@@ -710,10 +760,6 @@ def send_message(user_text, is_voice=False):
     if user_message_count % MEMORY_INTERVAL == 0:
         with st.spinner("Updating Aura's memory..."):
             extract_memories(chat)
-
-    # Automatically speak every new response.
-    if st.session_state.voice_enabled:
-        speak_response(answer)
 
 
 # =========================================================
@@ -730,6 +776,10 @@ with st.sidebar:
         "🔊 Automatic voice replies",
         value=st.session_state.voice_enabled,
         help="Aura speaks automatically after every response."
+    )
+
+    st.caption(
+        f"Voice: {AURA_VOICE} · Gemini 3.8 Flash TTS"
     )
 
     st.divider()
@@ -847,7 +897,7 @@ st.markdown("""
 
 
 # =========================================================
-# DISPLAY ACTIVE CONVERSATION
+# DISPLAY CONVERSATION
 # =========================================================
 
 chat = get_active_chat()
@@ -870,10 +920,11 @@ for message in chat["messages"]:
 
 
 # =========================================================
-# VOICE INPUT
+# MICROPHONE INPUT
 # =========================================================
 
 st.divider()
+
 st.markdown("### Speak to Aura")
 
 audio_file = st.audio_input(
@@ -887,7 +938,10 @@ if audio_file:
         use_container_width=True
     ):
         audio_bytes = audio_file.getvalue()
-        audio_hash = hashlib.sha256(audio_bytes).hexdigest()
+
+        audio_hash = hashlib.sha256(
+            audio_bytes
+        ).hexdigest()
 
         if audio_hash != st.session_state.last_audio_hash:
             st.session_state.last_audio_hash = audio_hash
@@ -897,7 +951,11 @@ if audio_file:
 
             if transcription:
                 st.caption(f"You said: {transcription}")
-                send_message(transcription, is_voice=True)
+
+                send_message(
+                    transcription,
+                    is_voice=True
+                )
 
         else:
             st.info("That recording has already been sent.")
