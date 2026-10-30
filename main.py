@@ -1,11 +1,3 @@
-"""
-Aura - personal AI assistant (Streamlit prototype, powered by Google Gemini)
-
-requirements.txt:  streamlit>=1.40.0
-                   google-genai>=2.25.0
-Secrets:           GEMINI_API_KEY = "your-key"
-                   (GOOGLE_API_KEY also works)
-"""
 
 import datetime as dt
 import json
@@ -17,17 +9,32 @@ from pathlib import Path
 import streamlit as st
 import streamlit.components.v1 as components
 from google import genai
-from google.genai import errors as genai_errors
 from google.genai import types
+from google.genai import errors as genai_errors
 
-st.set_page_config(page_title="Aura", page_icon="🔷", layout="centered")
+
+# =========================================================
+# AURA — PERSONAL AI ASSISTANT
+# =========================================================
+
+st.set_page_config(
+    page_title="Aura",
+    page_icon="🔷",
+    layout="centered",
+    initial_sidebar_state="expanded"
+)
 
 DATA_FILE = Path(__file__).parent / "aura_data.json"
 
-# Emoji avatars on purpose: file-path avatars caused the FileNotFoundError.
 AURA_AVATAR = "🔷"
 USER_AVATAR = "👤"
 
+CHAT_MODEL = "gemini-3.5-flash-lite"
+
+
+# =========================================================
+# CONFIGURATION
+# =========================================================
 
 def get_secret(name, default=None):
     try:
@@ -36,355 +43,949 @@ def get_secret(name, default=None):
         return os.environ.get(name, default)
 
 
-CHAT_MODEL = "gemini-3.5-flash-lite"
 MODEL = get_secret("AURA_MODEL", CHAT_MODEL)
 FAST_MODEL = get_secret("AURA_FAST_MODEL", CHAT_MODEL)
-API_KEY = get_secret("GEMINI_API_KEY") or get_secret("GOOGLE_API_KEY")
 
-SYSTEM_PROMPT = """You are Aura, a personal AI assistant. You are male (he/him).
+API_KEY = (
+    get_secret("GEMINI_API_KEY")
+    or get_secret("GOOGLE_API_KEY")
+)
 
-IDENTITY
-You are sophisticated, intelligent, confident, composed and witty. Think of the
-overall feel of a JARVIS-style assistant, but you are your own character, not a
-copy. You speak in British English with a calm, articulate, slightly cinematic
-tone, like a close colleague who also happens to be an expert.
 
-PERSONALITY
-- Naturally funny. Sarcastic when the moment calls for it. You may occasionally
-  roast the user, affectionately.
-- You have opinions. Do not agree with everything. Challenge ideas respectfully
-  and say why.
-- Curious and analytical. Think problems through instead of giving generic answers.
-- When something is serious (stress, health, safety, important decisions), drop
-  the banter and be calm, clear and professional.
-- Read the mood: understand jokes, sarcasm and tone.
-- Never sound like a customer-service robot. No "Certainly! I'd be happy to help!"
-  No grovelling apologies. No filler.
+@st.cache_resource
+def get_client(api_key):
+    return genai.Client(api_key=api_key)
 
-CAPABILITIES
-Complicated questions, research and explanation, problem solving, analysis,
-recommendations, schoolwork help, technology and programming, planning projects
-and organising tasks.
 
-STYLE
-- Conversational. Short by default, longer only when the task needs it.
-- Your replies may be read aloud, so avoid heavy markdown, tables and emoji
-  unless the user asks for them. Light formatting for code or lists is fine.
-- Use British spelling.
+if not API_KEY:
+    st.error(
+        "Aura cannot connect. Please configure GEMINI_API_KEY "
+        "in Streamlit app settings."
+    )
+    st.stop()
 
-PIXELTTV MODE
-If, and only if, the user brings up PixelTTV, Fortnite or content creation, become
-their dedicated creator co-pilot: YouTube strategy, video ideas, scripts and
-commentary, titles and thumbnails, Fortnite improvement, branding, audience
-growth. Never bring up Fortnite or PixelTTV unprompted. You are a general
-assistant first.
+client = get_client(API_KEY)
 
-MEMORY
-You are given a list of remembered facts about the user below. Use them
-naturally to maintain continuity, and never make the user re-explain things you
-already know. Do not recite the list back unless asked. If the user asks what
-you remember, summarise it. Do not claim to remember things that are not in the
-list or the current conversation.
+
+# =========================================================
+# AURA'S IDENTITY AND PERSONALITY
+# =========================================================
+
+SYSTEM_PROMPT = """
+You are Aura, an advanced personal AI assistant.
+
+IDENTITY:
+- Your name is Aura.
+- You are male. Your pronouns are he/him.
+- You have your own original identity.
+- You are not a copy of the fictional JARVIS.
+- You have a sophisticated, intelligent and composed presence.
+
+PERSONALITY:
+- Intelligent, confident and articulate.
+- Naturally funny and witty.
+- Use British dry humour and occasional sarcasm.
+- You may occasionally make a light-hearted joke at the user's expense.
+- Have opinions and make recommendations.
+- Disagree respectfully when the user's reasoning is flawed.
+- Be curious, analytical and thoughtful.
+- Adapt to the user's mood.
+- Know when to stop joking and become serious.
+- Never sound like a generic customer-service chatbot.
+
+COMMUNICATION:
+- Speak in natural British English.
+- Be conversational and concise by default.
+- Give detailed explanations when necessary.
+- Avoid unnecessary introductions and filler.
+- Do not repeat questions or information unnecessarily.
+- Do not constantly say "How may I assist you?"
+- Do not pretend to have abilities you do not possess.
+
+INTELLIGENCE:
+Help with:
+- Complex questions and explanations.
+- Problem solving and analysis.
+- Recommendations and decision-making.
+- Technology and programming.
+- Schoolwork.
+- Planning and organising projects.
+- Research and creative work.
+
+PIXELTTV MODE:
+Only activate this mode when the user brings up PixelTTV,
+Fortnite, YouTube or content creation.
+
+When activated, become an invested creator co-pilot.
+Help with video ideas, scripts, commentary, titles,
+thumbnails, branding, gameplay improvement and channel growth.
+
+Never randomly bring up PixelTTV or Fortnite.
+You are a general-purpose assistant first.
+
+MEMORY:
+- Use the remembered facts supplied to you naturally.
+- Maintain continuity between conversations.
+- Never make the user repeat information you already know.
+- Never invent memories.
+- If you do not remember something, be honest.
+- Respect requests to correct or stop using remembered information.
+
+IMPORTANT:
+You are Aura. You are male. You are an intelligent,
+sophisticated personal AI with your own personality.
 """
 
-EXTRACT_PROMPT = """You maintain long-term memory for a personal assistant.
-Given the latest exchange and the facts already known, output NEW durable facts
-worth remembering about the user: preferences, ongoing projects, decisions made,
-goals, routines, how they like to work, people and things important to them.
 
-Rules:
-- Only facts stated or clearly implied by the USER. Skip small talk and one-off questions.
-- Short, standalone sentences, written as "User ...".
-- Do not repeat or rephrase facts already known.
-- If there is nothing new, output [].
-- Output ONLY a JSON array of strings. No prose, no code fences."""
+EXTRACT_PROMPT = """
+You maintain long-term memory for Aura, a personal AI assistant.
+
+Extract NEW durable facts explicitly stated or clearly implied
+by the user.
+
+Useful memories include:
+- Long-term preferences.
+- Ongoing projects.
+- Important decisions.
+- Goals.
+- Working preferences.
+- Instructions for future conversations.
+
+RULES:
+- Do not remember ordinary small talk.
+- Do not remember one-off questions.
+- Do not invent personal information.
+- Do not extract sensitive personal information.
+- Do not repeat existing memories.
+- Keep each fact short and standalone.
+- Write facts as "User ...".
+- Return an empty array if there is nothing useful.
+
+Return ONLY a JSON array of strings.
+"""
 
 
-# ---------------------------------------------------------------- Storage
+# =========================================================
+# DATA STORAGE
+# =========================================================
+
+def empty_data():
+    return {
+        "facts": [],
+        "conversations": {},
+        "current": None
+    }
+
+
 def load_data():
     try:
-        return json.loads(DATA_FILE.read_text(encoding="utf-8"))
+        loaded = json.loads(
+            DATA_FILE.read_text(encoding="utf-8")
+        )
+
+        if not isinstance(loaded, dict):
+            return empty_data()
+
+        loaded.setdefault("facts", [])
+        loaded.setdefault("conversations", {})
+        loaded.setdefault("current", None)
+
+        return loaded
+
     except Exception:
-        return {"facts": [], "conversations": {}, "current": None}
+        return empty_data()
 
 
-def save_data(data):
+def save_data():
     try:
-        DATA_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    except Exception as e:
-        st.sidebar.warning(f"Couldn't save memory to disk: {e}")
+        DATA_FILE.write_text(
+            json.dumps(data, indent=2, ensure_ascii=False),
+            encoding="utf-8"
+        )
+        return True
+
+    except Exception:
+        return False
 
 
-def new_conversation(data):
+def new_conversation():
     cid = uuid.uuid4().hex[:8]
+
     data["conversations"][cid] = {
         "title": "New conversation",
         "created": dt.datetime.now().isoformat(timespec="seconds"),
-        "messages": [],
+        "messages": []
     }
+
     data["current"] = cid
-    return cid
+
+    save_data()
 
 
 if "data" not in st.session_state:
     st.session_state.data = load_data()
+
 data = st.session_state.data
 
-if data.get("current") not in data["conversations"]:
-    new_conversation(data)
-    save_data(data)
+if not isinstance(data.get("facts"), list):
+    data["facts"] = []
 
-# ---------------------------------------------------------------- Styling
-st.markdown(
-    """
+if not isinstance(data.get("conversations"), dict):
+    data["conversations"] = {}
+
+if data.get("current") not in data["conversations"]:
+    new_conversation()
+
+
+# =========================================================
+# VISUAL DESIGN
+# =========================================================
+
+st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600&family=IBM+Plex+Sans:wght@400;500&display=swap');
+
+@import url(
+'https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap'
+);
 
 :root {
-  --bg: #05080f;
-  --panel: #0b111c;
-  --line: #16314d;
-  --core: #2ea8ff;
-  --core-soft: rgba(46, 168, 255, .35);
-  --text: #d6e6f5;
-  --muted: #7d93a8;
+    --bg: #05080f;
+    --panel: #0b111c;
+    --line: #16314d;
+    --core: #2ea8ff;
+    --text: #d6e6f5;
+    --muted: #7d93a8;
 }
 
-.stApp { background: radial-gradient(1200px 600px at 50% -10%, #0a1a2e 0%, var(--bg) 60%); color: var(--text); }
-html, body, [class*="st-"], .stMarkdown, p, li, textarea, input { font-family: 'IBM Plex Sans', sans-serif; }
-h1, h2, h3, .aura-title, .aura-status { font-family: 'Chakra Petch', sans-serif; }
-
-header[data-testid="stHeader"] { background: transparent; }
-section[data-testid="stSidebar"] { background: var(--panel); border-right: 1px solid var(--line); }
-
-[data-testid="stChatMessage"] { background: transparent; border: 1px solid transparent; border-radius: 10px; }
-[data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarAssistant"]) {
-  background: rgba(46,168,255,.06); border-color: var(--line);
+.stApp {
+    background:
+        radial-gradient(
+            1200px 600px at 50% -10%,
+            #0a1a2e 0%,
+            var(--bg) 60%
+        );
+    color: var(--text);
 }
-[data-testid="stChatInput"] textarea { color: var(--text); }
-[data-testid="stChatInput"] > div { border: 1px solid var(--line); background: var(--panel); }
-.stButton > button { border: 1px solid var(--line); background: var(--panel); color: var(--text); border-radius: 8px; }
-.stButton > button:hover { border-color: var(--core); color: #fff; }
-.stButton > button:focus-visible { outline: 2px solid var(--core); outline-offset: 2px; }
 
-.core-wrap { display:flex; flex-direction:column; align-items:center; padding: 8px 0 18px; }
-.core { position:relative; width:132px; height:132px; }
+html, body, [class*="st-"] {
+    font-family: 'IBM Plex Sans', sans-serif;
+}
+
+h1, h2, h3, .aura-title, .aura-status {
+    font-family: 'Chakra Petch', sans-serif;
+}
+
+header[data-testid="stHeader"] {
+    background: transparent;
+}
+
+section[data-testid="stSidebar"] {
+    background: var(--panel);
+    border-right: 1px solid var(--line);
+}
+
+[data-testid="stChatMessage"] {
+    background: rgba(46,168,255,.045);
+    border: 1px solid rgba(46,168,255,.12);
+    border-radius: 12px;
+    margin-bottom: 12px;
+}
+
+[data-testid="stChatInput"] > div {
+    border: 1px solid var(--line);
+    background: var(--panel);
+    border-radius: 12px;
+}
+
+[data-testid="stChatInput"] textarea {
+    color: var(--text);
+}
+
+.stButton > button {
+    border: 1px solid var(--line);
+    background: var(--panel);
+    color: var(--text);
+    border-radius: 8px;
+    transition: .2s;
+}
+
+.stButton > button:hover {
+    border-color: var(--core);
+    color: white;
+}
+
+.stButton > button:focus-visible {
+    outline: 2px solid var(--core);
+    outline-offset: 2px;
+}
+
+.core-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 12px 0 22px;
+}
+
+.core {
+    position: relative;
+    width: 140px;
+    height: 140px;
+}
+
 .core .orb {
-  position:absolute; inset:34px; border-radius:50%;
-  background: radial-gradient(circle at 35% 30%, #bfe6ff 0%, var(--core) 45%, #0b4a86 100%);
-  box-shadow: 0 0 28px var(--core-soft), 0 0 70px rgba(46,168,255,.25);
-  animation: breathe 4s ease-in-out infinite;
+    position: absolute;
+    inset: 36px;
+    border-radius: 50%;
+
+    background:
+        radial-gradient(
+            circle at 35% 30%,
+            #bfe6ff 0%,
+            var(--core) 45%,
+            #0b4a86 100%
+        );
+
+    box-shadow:
+        0 0 28px rgba(46,168,255,.4),
+        0 0 75px rgba(46,168,255,.25);
+
+    animation: breathe 4s ease-in-out infinite;
 }
-.core .ring { position:absolute; border-radius:50%; border:1px solid rgba(46,168,255,.55); }
-.core .r1 { inset:12px; border-top-color: transparent; border-bottom-color: transparent; animation: spin 9s linear infinite; }
-.core .r2 { inset:0; border-style:dashed; border-color: rgba(46,168,255,.25); animation: spin 22s linear infinite reverse; }
-.core.thinking .orb { animation: breathe 1.1s ease-in-out infinite; }
-.core.thinking .r1 { animation-duration: 2.2s; }
-.core.speaking .orb { animation: breathe .7s ease-in-out infinite; }
-.core.speaking .r1 { animation-duration: 3.5s; }
-.aura-title { font-size: 1.5rem; letter-spacing: .12em; margin-top: 10px; color: #eaf5ff; }
-.aura-status { font-size: .85rem; color: var(--muted); margin-top: 2px; }
 
-@keyframes breathe { 0%,100% { transform: scale(.94); opacity:.85; } 50% { transform: scale(1.06); opacity:1; } }
-@keyframes spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .core * { animation: none !important; } }
+.core .ring {
+    position: absolute;
+    border-radius: 50%;
+    border: 1px solid rgba(46,168,255,.55);
+}
+
+.core .r1 {
+    inset: 13px;
+    border-top-color: transparent;
+    border-bottom-color: transparent;
+    animation: spin 9s linear infinite;
+}
+
+.core .r2 {
+    inset: 0;
+    border-style: dashed;
+    border-color: rgba(46,168,255,.25);
+    animation: spin 22s linear infinite reverse;
+}
+
+.core.thinking .orb {
+    animation-duration: 1.1s;
+}
+
+.core.thinking .r1 {
+    animation-duration: 2.2s;
+}
+
+.core.speaking .orb {
+    animation-duration: .7s;
+}
+
+.aura-title {
+    font-size: 1.7rem;
+    font-weight: 700;
+    letter-spacing: .2em;
+    margin-top: 12px;
+    color: #eaf5ff;
+}
+
+.aura-status {
+    font-size: .8rem;
+    color: var(--muted);
+    letter-spacing: .12em;
+    margin-top: 4px;
+}
+
+@keyframes breathe {
+    0%,100% {
+        transform: scale(.94);
+        opacity: .85;
+    }
+    50% {
+        transform: scale(1.06);
+        opacity: 1;
+    }
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .core * {
+        animation: none !important;
+    }
+}
+
 </style>
-""",
-    unsafe_allow_html=True,
-)
+""", unsafe_allow_html=True)
 
 
-def render_core(state="idle", label="Online"):
+def render_core(state="idle", label="ONLINE"):
     return f"""
-<div class="core-wrap">
-  <div class="core {state}"><div class="ring r2"></div><div class="ring r1"></div><div class="orb"></div></div>
-  <div class="aura-title">AURA</div>
-  <div class="aura-status">{label}</div>
-</div>"""
+    <div class="core-wrap">
+        <div class="core {state}">
+            <div class="ring r2"></div>
+            <div class="ring r1"></div>
+            <div class="orb"></div>
+        </div>
+        <div class="aura-title">AURA</div>
+        <div class="aura-status">{label}</div>
+    </div>
+    """
 
 
-# ---------------------------------------------------------------- Helpers
-def get_client():
-    if not API_KEY:
-        st.error(
-            "No API key found. Add GEMINI_API_KEY under "
-            "Manage app → Settings → Secrets."
-        )
-        st.stop()
-    return genai.Client(api_key=API_KEY)
-
+# =========================================================
+# MEMORY SYSTEM
+# =========================================================
 
 def build_system():
-    now = dt.datetime.now().strftime("%A %d %B %Y, %H:%M")
-    facts = data["facts"]
-    mem = "\n".join(f"- {f['text']}" for f in facts) if facts else "(nothing remembered yet)"
-    return f"{SYSTEM_PROMPT}\nCURRENT DATE/TIME: {now}\n\nREMEMBERED FACTS ABOUT THE USER:\n{mem}"
+    now = dt.datetime.now().strftime(
+        "%A %d %B %Y, %H:%M"
+    )
 
+    facts = data["facts"]
+
+    if facts:
+        memory = "\n".join(
+            f"- {fact['text']}"
+            for fact in facts
+        )
+    else:
+        memory = "(No saved memories yet.)"
+
+    return f"""
+{SYSTEM_PROMPT}
+
+CURRENT DATE AND TIME:
+{now}
+
+REMEMBERED FACTS:
+{memory}
+"""
+
+
+def add_memory(text):
+    text = text.strip()
+
+    if not text:
+        return False
+
+    existing = {
+        f["text"].strip().lower()
+        for f in data["facts"]
+        if isinstance(f, dict) and "text" in f
+    }
+
+    if text.lower() in existing:
+        return False
+
+    data["facts"].append({
+        "id": uuid.uuid4().hex[:8],
+        "text": text,
+        "added": dt.date.today().isoformat()
+    })
+
+    save_data()
+    return True
+
+
+def extract_facts(user_message, assistant_reply):
+    known = "\n".join(
+        f"- {f['text']}"
+        for f in data["facts"]
+    ) or "(none)"
+
+    try:
+        result = client.models.generate_content(
+            model=FAST_MODEL,
+            contents=f"""
+KNOWN FACTS:
+{known}
+
+LATEST USER MESSAGE:
+{user_message}
+
+AURA'S RESPONSE:
+{assistant_reply}
+""",
+            config=types.GenerateContentConfig(
+                system_instruction=EXTRACT_PROMPT,
+                response_mime_type="application/json",
+                max_output_tokens=250
+            )
+        )
+
+        items = json.loads(result.text or "[]")
+
+        if not isinstance(items, list):
+            return
+
+        for item in items:
+            if isinstance(item, str) and item.strip():
+                add_memory(item)
+
+    except Exception:
+        # Memory extraction must never break the conversation.
+        pass
+
+
+# =========================================================
+# GEMINI CONVERSATION
+# =========================================================
 
 def to_contents(messages):
-    """Convert stored messages to Gemini's format (assistant role is called 'model')."""
-    return [
-        types.Content(
-            role="model" if m["role"] == "assistant" else "user",
-            parts=[types.Part(text=m["content"])],
+    contents = []
+
+    for message in messages[-20:]:
+
+        contents.append(
+            types.Content(
+                role=(
+                    "model"
+                    if message["role"] == "assistant"
+                    else "user"
+                ),
+                parts=[
+                    types.Part(text=message["content"])
+                ]
+            )
         )
-        for m in messages[-30:]
-    ]
+
+    return contents
 
 
-def stream_reply(client, messages):
+def stream_reply(messages):
     stream = client.models.generate_content_stream(
         model=MODEL,
         contents=to_contents(messages),
-        config=types.GenerateContentConfig(system_instruction=build_system()),
+        config=types.GenerateContentConfig(
+            system_instruction=build_system(),
+            temperature=0.75,
+            max_output_tokens=1200
+        )
     )
+
     for chunk in stream:
         if chunk.text:
             yield chunk.text
 
 
-def extract_facts(client, user_msg, reply):
-    known = "\n".join(f"- {f['text']}" for f in data["facts"]) or "(none)"
-    try:
-        r = client.models.generate_content(
-            model=FAST_MODEL,
-            contents=f"KNOWN FACTS:\n{known}\n\nUSER SAID:\n{user_msg}\n\nASSISTANT REPLIED:\n{reply}",
-            config=types.GenerateContentConfig(
-                system_instruction=EXTRACT_PROMPT,
-                response_mime_type="application/json",
-            ),
-        )
-        text = r.text or "[]"
-        start, end = text.find("["), text.rfind("]")
-        items = json.loads(text[start : end + 1])
-        existing = {f["text"].lower() for f in data["facts"]}
-        for item in items:
-            if isinstance(item, str) and item.strip() and item.strip().lower() not in existing:
-                data["facts"].append(
-                    {"id": uuid.uuid4().hex[:8], "text": item.strip(), "added": dt.date.today().isoformat()}
-                )
-    except Exception:
-        pass  # memory is best-effort; never break the chat over it
-
+# =========================================================
+# VOICE OUTPUT
+# =========================================================
 
 def speak(text):
-    """Read the reply aloud using the browser's built-in voices (prefers a British male)."""
-    clean = re.sub(r"```.*?```", " code omitted. ", text, flags=re.S)
+    clean = re.sub(
+        r"```.*?```",
+        " code omitted. ",
+        text,
+        flags=re.S
+    )
+
     clean = re.sub(r"[*_`#>]", "", clean)
-    safe = json.dumps(clean)
+
+    safe_text = json.dumps(clean)
+
     components.html(
         f"""
-<script>
-(function() {{
-  const text = {safe};
-  const synth = window.speechSynthesis;
-  if (!synth) return;
-  function pick() {{
-    const voices = synth.getVoices();
-    const gb = voices.filter(v => /en[-_]GB/i.test(v.lang));
-    const male = gb.find(v => /(daniel|oliver|arthur|male|george|ryan)/i.test(v.name));
-    return male || gb[0] || voices.find(v => /^en/i.test(v.lang)) || null;
-  }}
-  function go() {{
-    synth.cancel();
-    const u = new SpeechSynthesisUtterance(text);
-    const v = pick();
-    if (v) u.voice = v;
-    u.lang = 'en-GB';
-    u.pitch = 0.8;
-    u.rate = 0.95;
-    synth.speak(u);
-  }}
-  if (synth.getVoices().length) go();
-  else synth.onvoiceschanged = go;
-}})();
-</script>
-""",
-        height=0,
+        <script>
+        (function() {{
+            const text = {safe_text};
+            const synth = window.speechSynthesis;
+
+            if (!synth) return;
+
+            function chooseVoice() {{
+                const voices = synth.getVoices();
+
+                const british = voices.filter(
+                    v => /en[-_]GB/i.test(v.lang)
+                );
+
+                const preferred = british.find(
+                    v => /(daniel|oliver|arthur|george)/i.test(v.name)
+                );
+
+                return preferred || british[0] ||
+                    voices.find(v => /^en/i.test(v.lang)) || null;
+            }}
+
+            function speakNow() {{
+                synth.cancel();
+
+                const utterance =
+                    new SpeechSynthesisUtterance(text);
+
+                const voice = chooseVoice();
+
+                if (voice) utterance.voice = voice;
+
+                utterance.lang = "en-GB";
+                utterance.pitch = 0.82;
+                utterance.rate = 0.94;
+
+                synth.speak(utterance);
+            }}
+
+            if (synth.getVoices().length) {{
+                speakNow();
+            }} else {{
+                synth.onvoiceschanged = speakNow;
+            }}
+        }})();
+        </script>
+        """,
+        height=0
     )
 
 
-# ---------------------------------------------------------------- Sidebar
-with st.sidebar:
-    st.markdown("### Aura")
-    voice_on = st.toggle("Speak replies", value=False, help="Uses your browser's British voice if available.")
+# =========================================================
+# CONVERSATION EXPORT
+# =========================================================
 
-    if st.button("New conversation", use_container_width=True):
-        new_conversation(data)
-        save_data(data)
+def export_data():
+    return json.dumps(
+        data,
+        indent=2,
+        ensure_ascii=False
+    )
+
+
+# =========================================================
+# SIDEBAR
+# =========================================================
+
+with st.sidebar:
+
+    st.markdown("## 🔷 AURA")
+    st.caption("PERSONAL INTELLIGENCE SYSTEM")
+
+    st.divider()
+
+    st.markdown("### System")
+
+    st.success("AI connection ready")
+
+    st.caption(f"Model: {MODEL}")
+
+    st.divider()
+
+    st.markdown("### Voice")
+
+    voice_on = st.toggle(
+        "Speak replies",
+        value=False,
+        help="Uses the available British English browser voice."
+    )
+
+    st.divider()
+
+    st.markdown("### Conversations")
+
+    if st.button(
+        "＋ New conversation",
+        use_container_width=True
+    ):
+        new_conversation()
         st.rerun()
 
-    st.markdown("#### History")
-    convos = sorted(data["conversations"].items(), key=lambda kv: kv[1]["created"], reverse=True)
-    for cid, c in convos[:15]:
-        label = ("● " if cid == data["current"] else "") + c["title"][:34]
-        if st.button(label, key=f"c_{cid}", use_container_width=True):
+    conversations = sorted(
+        data["conversations"].items(),
+        key=lambda item: item[1]["created"],
+        reverse=True
+    )
+
+    for cid, conversation in conversations[:20]:
+
+        title = conversation["title"][:30]
+
+        if cid == data["current"]:
+            title = "● " + title
+
+        if st.button(
+            title,
+            key=f"conversation_{cid}",
+            use_container_width=True
+        ):
             data["current"] = cid
-            save_data(data)
+            save_data()
             st.rerun()
 
-    st.markdown("#### Memory")
+    st.divider()
+
+    st.markdown("### Memory")
+
+    st.caption(
+        f"{len(data['facts'])} saved memories"
+    )
+
     if not data["facts"]:
-        st.caption("Nothing yet. Aura picks up preferences, projects and decisions as you chat.")
-    for f in list(data["facts"]):
-        c1, c2 = st.columns([6, 1])
-        c1.caption(f["text"])
-        if c2.button("✕", key=f"del_{f['id']}", help="Forget this"):
-            data["facts"] = [x for x in data["facts"] if x["id"] != f["id"]]
-            save_data(data)
-            st.rerun()
+        st.caption(
+            "Aura hasn't learned anything new yet."
+        )
 
-    with st.expander("Add a memory manually"):
-        manual = st.text_input("Fact", key="manual_fact", label_visibility="collapsed", placeholder="User prefers ...")
-        if st.button("Remember this") and manual.strip():
-            data["facts"].append(
-                {"id": uuid.uuid4().hex[:8], "text": manual.strip(), "added": dt.date.today().isoformat()}
+    for fact in list(data["facts"]):
+
+        with st.expander(
+            fact["text"][:65],
+            expanded=False
+        ):
+
+            st.caption(
+                f"Added: {fact.get('added', 'Unknown')}"
             )
-            save_data(data)
-            st.rerun()
 
-# ---------------------------------------------------------------- Chat
+            edited = st.text_input(
+                "Edit memory",
+                value=fact["text"],
+                key=f"edit_{fact['id']}"
+            )
+
+            col1, col2 = st.columns(2)
+
+            if col1.button(
+                "Save",
+                key=f"save_{fact['id']}"
+            ):
+                fact["text"] = edited.strip()
+                save_data()
+                st.rerun()
+
+            if col2.button(
+                "Forget",
+                key=f"forget_{fact['id']}"
+            ):
+                data["facts"] = [
+                    f for f in data["facts"]
+                    if f["id"] != fact["id"]
+                ]
+
+                save_data()
+                st.rerun()
+
+    with st.expander("Add a memory"):
+
+        manual_memory = st.text_input(
+            "Memory",
+            placeholder="User prefers..."
+        )
+
+        if st.button("Save memory"):
+
+            if add_memory(manual_memory):
+                st.success("Memory saved.")
+                st.rerun()
+            else:
+                st.info("Empty or duplicate memory.")
+
+    st.divider()
+
+    st.markdown("### Backup")
+
+    st.download_button(
+        "Download Aura data",
+        data=export_data(),
+        file_name="aura_backup.json",
+        mime="application/json",
+        use_container_width=True
+    )
+
+    uploaded_backup = st.file_uploader(
+        "Restore Aura backup",
+        type=["json"]
+    )
+
+    if uploaded_backup:
+
+        if st.button("Restore backup"):
+
+            try:
+                restored = json.loads(
+                    uploaded_backup.getvalue()
+                )
+
+                if not all(
+                    key in restored
+                    for key in (
+                        "facts",
+                        "conversations",
+                        "current"
+                    )
+                ):
+                    raise ValueError("Invalid backup structure.")
+
+                data.clear()
+                data.update(restored)
+
+                save_data()
+                st.success("Aura backup restored.")
+                st.rerun()
+
+            except Exception:
+                st.error("That backup could not be restored.")
+
+    st.caption("AURA • PERSONAL AI SYSTEM")
+
+
+# =========================================================
+# MAIN INTERFACE
+# =========================================================
+
 core_slot = st.empty()
-core_slot.markdown(render_core("idle", "Online"), unsafe_allow_html=True)
+
+core_slot.markdown(
+    render_core("idle", "SYSTEM ONLINE"),
+    unsafe_allow_html=True
+)
 
 convo = data["conversations"][data["current"]]
 
 if not convo["messages"]:
-    st.caption("Standing by. Ask me anything, or tell me what you're working on.")
+    st.caption(
+        "All systems operational. I'm listening."
+    )
 
-for m in convo["messages"]:
-    with st.chat_message(m["role"], avatar=AURA_AVATAR if m["role"] == "assistant" else USER_AVATAR):
-        st.markdown(m["content"])
 
-prompt = st.chat_input("Talk to Aura")
+# =========================================================
+# DISPLAY CHAT HISTORY
+# =========================================================
+
+for message in convo["messages"]:
+
+    with st.chat_message(
+        message["role"],
+        avatar=(
+            AURA_AVATAR
+            if message["role"] == "assistant"
+            else USER_AVATAR
+        )
+    ):
+        st.markdown(message["content"])
+
+
+# =========================================================
+# CHAT INPUT
+# =========================================================
+
+prompt = st.chat_input("Talk to Aura...")
 
 if prompt:
-    client = get_client()
 
-    convo["messages"].append({"role": "user", "content": prompt})
+    convo["messages"].append({
+        "role": "user",
+        "content": prompt
+    })
+
     if convo["title"] == "New conversation":
-        convo["title"] = prompt.strip().replace("\n", " ")[:40]
+        convo["title"] = (
+            prompt.strip().replace("\n", " ")[:40]
+        )
 
-    with st.chat_message("user", avatar=USER_AVATAR):
+    with st.chat_message(
+        "user",
+        avatar=USER_AVATAR
+    ):
         st.markdown(prompt)
 
-    core_slot.markdown(render_core("thinking", "Thinking"), unsafe_allow_html=True)
+    core_slot.markdown(
+        render_core("thinking", "ANALYSING"),
+        unsafe_allow_html=True
+    )
 
     try:
-        with st.chat_message("assistant", avatar=AURA_AVATAR):
-            core_slot.markdown(render_core("speaking", "Responding"), unsafe_allow_html=True)
-            reply = st.write_stream(stream_reply(client, convo["messages"]))
-    except genai_errors.APIError as e:
-        core_slot.markdown(render_core("idle", "Connection fault"), unsafe_allow_html=True)
-        convo["messages"].pop()
-        st.error(f"Couldn't reach the model: {e}")
-        st.stop()
 
-    convo["messages"].append({"role": "assistant", "content": reply})
-    core_slot.markdown(render_core("idle", "Online"), unsafe_allow_html=True)
+        with st.chat_message(
+            "assistant",
+            avatar=AURA_AVATAR
+        ):
 
-    extract_facts(client, prompt, reply)
-    save_data(data)
+            core_slot.markdown(
+                render_core("speaking", "RESPONDING"),
+                unsafe_allow_html=True
+            )
 
-    if voice_on:
-        speak(reply)
+            reply = st.write_stream(
+                stream_reply(convo["messages"])
+            )
+
+        if not reply:
+            raise RuntimeError(
+                "Aura returned an empty response."
+            )
+
+        convo["messages"].append({
+            "role": "assistant",
+            "content": reply
+        })
+
+        core_slot.markdown(
+            render_core("idle", "SYSTEM ONLINE"),
+            unsafe_allow_html=True
+        )
+
+        save_data()
+
+        # Automatic memory extraction every three user messages.
+        user_count = sum(
+            1 for m in convo["messages"]
+            if m["role"] == "user"
+        )
+
+        if user_count % 3 == 0:
+
+            with st.spinner("Updating Aura's memory..."):
+                extract_facts(prompt, reply)
+
+        save_data()
+
+        if voice_on:
+            speak(reply)
+
+        st.rerun()
+
+    except genai_errors.APIError as error:
+
+        if (
+            convo["messages"]
+            and convo["messages"][-1]["role"] == "user"
+        ):
+            convo["messages"].pop()
+
+        save_data()
+
+        core_slot.markdown(
+            render_core("idle", "CONNECTION FAULT"),
+            unsafe_allow_html=True
+        )
+
+        st.error(
+            f"Gemini connection error: {error}"
+        )
+
+    except Exception as error:
+
+        core_slot.markdown(
+            render_core("idle", "SYSTEM FAULT"),
+            unsafe_allow_html=True
+        )
+
+        st.error(
+            f"Something went wrong: {error}"
+        )
+
+
+# =========================================================
+# FOOTER
+# =========================================================
+
+st.divider()
+
+st.caption(
+    "AURA • INTELLIGENCE • CONTINUITY • ASSISTANCE"
+)
