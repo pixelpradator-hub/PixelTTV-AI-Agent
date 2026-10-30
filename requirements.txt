@@ -1,6 +1,7 @@
 
-google-api-python-client
-google-auth-oauthlib
-google-auth-httplib2
-google-genai
-streamlit
+streamlit>=1.40.0
+google-genai>=2.25.0
+google-api-python-client>=2.150.0
+google-auth>=2.38.0
+google-auth-oauthlib>=1.2.1
+google-auth-httplib2>=0.2.0
