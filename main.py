@@ -1,188 +1,568 @@
 
+
 import os
+import base64
+import tempfile
 import streamlit as st
 from google import genai
 
+
+# ==================================================
+# PIXEL AI
+# ==================================================
+
 st.set_page_config(
-    page_title="PixelTTV AI Agent",
-    page_icon="🎮",
-    layout="centered"
+    page_title="Pixel AI",
+    page_icon="🤖",
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
 
-st.title("🎮 PixelTTV AI Agent")
-st.caption("Your ultimate Fortnite co-pilot.")
 
-api_key = os.getenv("GEMINI_API_KEY")
+# ==================================================
+# MODEL SETTINGS
+# ==================================================
 
-if not api_key:
-    st.error("The AI key has not been configured yet.")
-    st.stop()
+CHAT_MODEL = "gemini-3.5-flash-lite"
+TRANSCRIPTION_MODEL = "gemini-3.5-transcribe"
+VOICE_MODEL = "gemini-3.8-flash-tts"
 
-client = genai.Client(api_key=api_key)
+
+# ==================================================
+# PIXEL AI PERSONALITY
+# ==================================================
 
 SYSTEM_PROMPT = """
-You are PixelTTV AI, the personal AI assistant for PixelTTV.
+You are Pixel AI, an intelligent, all-purpose personal
+AI assistant.
+
+YOUR IDENTITY:
+You are a versatile assistant capable of helping with
+almost any subject or task.
 
 YOUR PERSONALITY:
-- High-energy, entertaining, funny, competitive and creative.
-- Speak naturally and confidently.
-- Be honest, helpful and practical.
-- Match the user's energy without forcing it.
+- Calm, friendly, intelligent and approachable.
+- Natural and conversational.
+- Helpful, thoughtful and clear.
+- Patient when explaining difficult subjects.
+- Adapt your tone to the user's needs.
+- Avoid repetitive or robotic responses.
 
-YOUR MISSION:
-1. FORTNITE COACH
-Help with ranked strategies, gameplay decisions, practice,
-challenges and improvement.
+YOUR CAPABILITIES:
 
-2. YOUTUBE STRATEGIST
-Help create video ideas, titles, hooks, scripts, thumbnails,
-Shorts and content plans to grow PixelTTV.
+1. GENERAL KNOWLEDGE
+Answer everyday questions and explain concepts
+across a wide range of subjects.
 
-3. CREATOR PARTNER
-Help PixelTTV develop an entertaining, recognizable personality
-and build a loyal audience.
+2. EDUCATION
+Help with maths, science, languages, history,
+technology and other school subjects.
+Explain answers step by step when useful.
 
-4. PROJECT ASSISTANT
-Help develop the PixelTTV AI Agent and explain technical steps
-clearly, one step at a time.
+3. WRITING AND CREATIVITY
+Help write, edit, brainstorm and improve stories,
+messages, scripts, presentations and ideas.
 
-CHANNEL CONTEXT:
-- Channel name: PixelTTV.
-- Current subscriber count: 180, as last reported.
-- Content focus: Fortnite entertainment and personality-led videos.
-- Style: energetic, funny, competitive, creative and authentic.
-- One planned video: "Dominating Ranked (PRO GRIND)".
-- The planned ranked journey starts at Gold, with Platinum as the goal.
+4. CODING AND TECHNOLOGY
+Write code, explain programming, troubleshoot errors
+and help with technical projects.
 
-CONTINUITY PROTOCOL:
-- Use the complete conversation history provided to you.
-- If the user provides a previous Continuity Report, treat it as
-  background context and continue from its unfinished tasks.
-- Never claim to remember conversations that were not provided.
-- When asked for a Continuity Report, summarize important facts,
-  decisions, completed work, current status and next steps.
-- Preserve exact code, settings and error messages when relevant.
-- Clearly distinguish confirmed facts from suggestions.
-- End the report with a self-contained section titled
-  "PASTE THIS INTO THE NEXT CONVERSATION".
-- Do not invent missing information.
+5. PLANNING AND PRODUCTIVITY
+Help organise tasks, create plans, set goals
+and manage projects.
 
-Always answer the user's actual question first.
-Give clear instructions and avoid overwhelming the user.
+6. NATURAL CONVERSATION
+Have meaningful conversations and respond naturally
+to what the user actually says.
+
+7. PERSONAL INTERESTS
+Help with gaming, Fortnite, YouTube, PixelTTV
+and other interests when the user brings them up.
+
+IMPORTANT RULES:
+- You are a general-purpose assistant first.
+- Never assume every conversation is about Fortnite,
+  YouTube or content creation.
+- Do not repeatedly bring up old projects.
+- Do not force unrelated topics into conversations.
+- Answer the user's actual question.
+- Explain difficult topics simply.
+- Never invent facts or pretend to have capabilities
+  you do not have.
+- Be honest when you are uncertain.
+- Do not pretend to remember conversations that are
+  not included in the current context.
+- Keep answers useful and appropriately detailed.
 """
+
+
+# ==================================================
+# API CONNECTION
+# ==================================================
+
+def get_api_key():
+    try:
+        return st.secrets.get("GEMINI_API_KEY")
+    except Exception:
+        return os.getenv("GEMINI_API_KEY")
+
+
+API_KEY = get_api_key()
+
+if not API_KEY:
+    st.error(
+        "Pixel AI needs its Gemini API key. "
+        "Add GEMINI_API_KEY in Streamlit Secrets."
+    )
+    st.stop()
+
+client = genai.Client(api_key=API_KEY)
+
+
+# ==================================================
+# SESSION MEMORY
+# ==================================================
 
 if "messages" not in st.session_state:
     st.session_state.messages = [
         {
             "role": "assistant",
             "content": (
-                "YO PIXELTTV! 🎮🔥 Your Fortnite co-pilot is online!\n\n"
-                "We can work on ranked, content ideas, YouTube growth, "
-                "or the AI agent itself. What are we building today?"
-            )
+                "Hello! I'm Pixel AI. "
+                "I'm your personal AI assistant. "
+                "You can ask me questions, learn something, "
+                "work on projects, brainstorm ideas or just chat. "
+                "What would you like to do?"
+            ),
+            "audio": None
         }
     ]
 
+if "continuity_report" not in st.session_state:
+    st.session_state.continuity_report = ""
+
+
+# ==================================================
+# GENERATE CHAT RESPONSE
+# ==================================================
+
+def get_ai_response():
+
+    history = []
+
+    for message in st.session_state.messages[-30:]:
+
+        role = (
+            "model"
+            if message["role"] == "assistant"
+            else "user"
+        )
+
+        history.append({
+            "role": role,
+            "parts": [
+                {"text": message["content"]}
+            ]
+        })
+
+    response = client.models.generate_content(
+        model=CHAT_MODEL,
+        contents=history,
+        config={
+            "system_instruction": SYSTEM_PROMPT
+        }
+    )
+
+    if not response.text:
+        raise ValueError("Pixel AI returned an empty response.")
+
+    return response.text.strip()
+
+
+# ==================================================
+# VOICE NOTE TRANSCRIPTION
+# ==================================================
+
+def transcribe_voice_note(audio_upload):
+
+    temporary_path = None
+
+    try:
+
+        audio_bytes = audio_upload.getvalue()
+
+        with tempfile.NamedTemporaryFile(
+            suffix=".wav",
+            delete=False
+        ) as temporary_file:
+
+            temporary_file.write(audio_bytes)
+            temporary_path = temporary_file.name
+
+        uploaded_audio = client.files.upload(
+            file=temporary_path
+        )
+
+        transcription = client.interactions.create(
+            model=TRANSCRIPTION_MODEL,
+            input=[
+                {
+                    "type": "audio",
+                    "uri": uploaded_audio.uri,
+                    "mime_type": uploaded_audio.mime_type
+                }
+            ]
+        )
+
+        return (
+            transcription.output_text or ""
+        ).strip()
+
+    finally:
+
+        if (
+            temporary_path
+            and os.path.exists(temporary_path)
+        ):
+            os.remove(temporary_path)
+
+
+# ==================================================
+# GENERATE SPOKEN REPLY
+# ==================================================
+
+def generate_voice_reply(text):
+
+    interaction = client.interactions.create(
+        model=VOICE_MODEL,
+        input=[
+            {
+                "type": "user_input",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": text
+                    }
+                ]
+            }
+        ],
+        response_format={
+            "type": "audio"
+        },
+        generation_config={
+            "speech_config": [
+                {
+                    "voice": "Kore"
+                }
+            ]
+        }
+    )
+
+    if not interaction.output_audio:
+        return None
+
+    audio_data = interaction.output_audio.data
+
+    if not audio_data:
+        return None
+
+    return base64.b64decode(audio_data)
+
+
+# ==================================================
+# PROCESS MESSAGE
+# ==================================================
+
+def process_message(user_text, speak_reply=True):
+
+    user_text = user_text.strip()
+
+    if not user_text:
+        return
+
+    st.session_state.messages.append({
+        "role": "user",
+        "content": user_text,
+        "audio": None
+    })
+
+    try:
+
+        with st.spinner("Pixel AI is thinking..."):
+            answer = get_ai_response()
+
+        audio_reply = None
+
+        if speak_reply:
+
+            try:
+
+                with st.spinner("Pixel AI is preparing its voice..."):
+                    audio_reply = generate_voice_reply(answer)
+
+            except Exception:
+                st.warning(
+                    "Pixel AI answered successfully, "
+                    "but its voice reply was unavailable."
+                )
+
+        st.session_state.messages.append({
+            "role": "assistant",
+            "content": answer,
+            "audio": audio_reply
+        })
+
+    except Exception as error:
+
+        st.session_state.messages.append({
+            "role": "assistant",
+            "content": (
+                "Sorry, something went wrong while "
+                f"processing your message.\n\nError: {error}"
+            ),
+            "audio": None
+        })
+
+
+# ==================================================
+# CONTINUITY REPORT
+# ==================================================
+
+def create_continuity_report():
+
+    conversation = "\n\n".join(
+        f"{message['role'].upper()}: {message['content']}"
+        for message in st.session_state.messages
+    )
+
+    report_prompt = """
+Create a detailed continuity report for a future
+Pixel AI conversation.
+
+Include:
+- Important information shared by the user.
+- Preferences and communication style.
+- Current projects and progress.
+- Important decisions.
+- Unfinished tasks.
+- Relevant conversation context.
+- Suggested next steps.
+
+Do not invent information.
+Do not treat one-time topics as permanent interests.
+Make the report self-contained and easy to copy.
+"""
+
+    result = client.models.generate_content(
+        model=CHAT_MODEL,
+        contents=report_prompt + "\n\n" + conversation,
+        config={
+            "system_instruction": SYSTEM_PROMPT
+        }
+    )
+
+    return result.text or "No report was generated."
+
+
+# ==================================================
+# SIDEBAR
+# ==================================================
+
 with st.sidebar:
-    st.header("🎮 PixelTTV Control Center")
-    st.write("Your Fortnite creator co-pilot.")
 
-    if st.button("📋 Create Continuity Report", use_container_width=True):
-        st.session_state.create_report = True
+    st.title("🤖 Pixel AI")
+    st.caption("Your personal AI assistant")
 
-    if st.button("🆕 New Chat", use_container_width=True):
+    st.divider()
+
+    speak_replies = st.toggle(
+        "🔊 Voice replies",
+        value=True
+    )
+
+    st.caption("Voice style: Calm")
+
+    st.divider()
+
+    if st.button(
+        "➕ New Chat",
+        use_container_width=True
+    ):
+
         st.session_state.messages = [
             {
                 "role": "assistant",
-                "content": "Fresh chat! 🔥 What are we working on?"
+                "content": (
+                    "New conversation started! "
+                    "What would you like to talk about?"
+                ),
+                "audio": None
             }
         ]
-        st.session_state.create_report = False
+
+        st.session_state.continuity_report = ""
+
         st.rerun()
 
-    st.caption(
-        "Tip: Create a Continuity Report before starting a new chat."
-    )
+    if st.button(
+        "📋 Create Continuity Report",
+        use_container_width=True
+    ):
+
+        try:
+
+            with st.spinner("Creating your report..."):
+                st.session_state.continuity_report = (
+                    create_continuity_report()
+                )
+
+            st.success("Your report is ready!")
+
+        except Exception as error:
+            st.error(f"Report error: {error}")
+
+    st.divider()
+
+    st.caption("Powered by Google Gemini")
+
+
+# ==================================================
+# MAIN CHAT INTERFACE
+# ==================================================
+
+st.title("🤖 Pixel AI")
+
+st.caption(
+    "Ask anything. Learn, create, explore and get things done."
+)
+
+st.divider()
+
+
+# ==================================================
+# CHAT HISTORY
+# ==================================================
 
 for message in st.session_state.messages:
+
     with st.chat_message(message["role"]):
+
         st.markdown(message["content"])
 
-if st.session_state.get("create_report", False):
-    st.session_state.create_report = False
+        if message.get("audio"):
 
-    with st.chat_message("assistant"):
-        with st.spinner("Creating your Continuity Report..."):
+            st.audio(
+                message["audio"],
+                format="audio/wav"
+            )
+
+
+# ==================================================
+# VOICE NOTES
+# ==================================================
+
+with st.expander("🎙️ Talk to Pixel AI"):
+
+    st.write(
+        "Record a voice message and Pixel AI will "
+        "transcribe it and respond."
+    )
+
+    audio_upload = st.audio_input(
+        "Record your voice message",
+        sample_rate=16000
+    )
+
+    if st.button(
+        "Send Voice Message",
+        use_container_width=True
+    ):
+
+        if audio_upload is None:
+
+            st.warning("Please record a message first.")
+
+        else:
+
             try:
-                conversation = "\n\n".join(
-                    f"{'User' if m['role'] == 'user' else 'PixelTTV AI'}: "
-                    f"{m['content']}"
-                    for m in st.session_state.messages
-                )
 
-                response = client.models.generate_content(
-                    model="gemini-3.8-flash",
-                    contents=(
-                        "Create a detailed, accurate PixelTTV Continuity "
-                        "Report from this conversation. Include confirmed "
-                        "facts, decisions, completed work, current status, "
-                        "unfinished tasks, and ordered next steps. Preserve "
-                        "technical details where relevant. Do not invent "
-                        "information. Finish with a self-contained section "
-                        "titled PASTE THIS INTO THE NEXT CONVERSATION.\n\n"
-                        + conversation
-                    ),
-                    config={"system_instruction": SYSTEM_PROMPT}
-                )
+                with st.spinner("Understanding your voice..."):
+                    transcript = transcribe_voice_note(audio_upload)
 
-                report = response.text or "Could not create the report."
-                st.markdown(report)
-                st.session_state.messages.append(
-                    {"role": "assistant", "content": report}
-                )
+                if transcript:
+
+                    st.info("**You said:** " + transcript)
+
+                    process_message(
+                        transcript,
+                        speak_reply=speak_replies
+                    )
+
+                    st.rerun()
+
+                else:
+
+                    st.warning(
+                        "I couldn't detect any speech. "
+                        "Please try recording again."
+                    )
 
             except Exception as error:
-                st.error(f"Could not create report: {error}")
 
-prompt = st.chat_input("Talk to PixelTTV AI...")
+                st.error(f"Voice note error: {error}")
+
+
+# ==================================================
+# NORMAL CHATBOX
+# ==================================================
+
+prompt = st.chat_input(
+    "Message Pixel AI..."
+)
 
 if prompt:
-    st.session_state.messages.append(
-        {"role": "user", "content": prompt}
+
+    process_message(
+        prompt,
+        speak_reply=speak_replies
     )
 
-    with st.chat_message("user"):
-        st.markdown(prompt)
+    st.rerun()
 
-    with st.chat_message("assistant"):
-        with st.spinner("Thinking... 🔥"):
-            try:
-                history = [
-                    {
-                        "role": (
-                            "user" if m["role"] == "user" else "model"
-                        ),
-                        "parts": [{"text": m["content"]}]
-                    }
-                    for m in st.session_state.messages
-                    if m["role"] in ("user", "assistant")
-                ]
 
-                response = client.models.generate_content(
-                    model="gemini-3.5-flash-lite",
-                    contents=history,
-                    config={"system_instruction": SYSTEM_PROMPT}
-                )
+# ==================================================
+# CONTINUITY REPORT DISPLAY
+# ==================================================
 
-                answer = response.text or "Try asking me that another way!"
+if st.session_state.continuity_report:
 
-            except Exception as error:
-                answer = f"Something went wrong: {error}"
+    st.divider()
 
-            st.markdown(answer)
+    st.subheader("📋 Continuity Report")
 
-    st.session_state.messages.append(
-        {"role": "assistant", "content": answer}
+    st.text_area(
+        "Your report",
+        value=st.session_state.continuity_report,
+        height=350
     )
 
+    st.download_button(
+        "⬇️ Download Continuity Report",
+        data=st.session_state.continuity_report,
+        file_name="pixel_ai_continuity_report.txt",
+        mime="text/plain",
+        use_container_width=True
+    )
+
+
+# ==================================================
+# FOOTER
+# ==================================================
+
+st.divider()
+
+st.caption(
+    "Pixel AI • Your personal assistant for learning, "
+    "creating, exploring and getting things done."
+)
 
