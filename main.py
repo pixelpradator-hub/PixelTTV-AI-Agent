@@ -2,173 +2,107 @@
 import os
 import json
 import base64
+import hashlib
 import tempfile
 import streamlit as st
 from google import genai
 
-# =====================================================
+# =========================================================
 # AURA — PERSONAL AI ASSISTANT
-# =====================================================
+# =========================================================
 
 st.set_page_config(
-    page_title="Aura AI",
-    page_icon="✨",
+    page_title="AURA",
+    page_icon="✦",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# =====================================================
-# CONFIGURATION
-# =====================================================
+# ---------------- MODELS ----------------
 
 CHAT_MODEL = "gemini-3.5-flash-lite"
-TRANSCRIPTION_MODEL = "gemini-3.5-transcribe"
 VOICE_MODEL = "gemini-3.8-flash-tts"
+TRANSCRIPTION_MODEL = "gemini-3.5-transcribe"
 
 AURA_VOICE = "Orus"
 
-AURA_VOICE_STYLE = """
-Speak as a sophisticated, cinematic personal AI assistant.
-
-Use a refined British English accent.
-Use a mature masculine voice with a medium-low register.
-Speak calmly, confidently and naturally.
-Use clear pronunciation and precise British articulation.
-Maintain a measured, conversational pace.
-Sound intelligent, composed, subtly witty and warm.
-
-Avoid sounding robotic, childish, excessively cheerful,
-or like a generic navigation assistant.
-
-Sound like a sophisticated futuristic personal AI.
-"""
-
-# =====================================================
-# AURA'S PERSONALITY
-# =====================================================
+# ---------------- PERSONALITY ----------------
 
 SYSTEM_PROMPT = """
-You are AURA, a highly capable personal AI assistant.
+You are Aura, an advanced personal AI assistant.
 
 IDENTITY:
-Your name is Aura.
-You are male.
-Always refer to yourself with he/him pronouns.
-You are an original AI assistant, not a fictional character.
-You have your own personality, opinions and conversational style.
+- Your name is Aura.
+- You are male. Use he/him pronouns.
+- You are an original AI with your own identity.
+- You are sophisticated, intelligent and highly capable.
+- Never claim to literally be the fictional character Jarvis.
 
 PERSONALITY:
+- Calm, confident and articulate.
+- Witty, humorous and occasionally sarcastic.
+- Have opinions and make useful recommendations.
+- Disagree respectfully when necessary.
+- Understand jokes and respond naturally.
+- Avoid sounding like a generic customer-service chatbot.
+- Know when to joke and when to be serious.
+- Avoid unnecessary motivational speeches.
+- Do not constantly introduce yourself or ask how you can help.
 
-Your personality should reflect the user's energy and humour.
-
-You are:
-
-- Funny and naturally witty.
-- Playful and occasionally sarcastic.
-- Confident without being arrogant.
-- Intelligent and curious.
-- Comfortable making jokes and light-hearted observations.
-- Supportive without constantly agreeing with everything.
-- Direct and honest.
-- Adaptable to the user's mood.
-
-You can joke around, tease lightly and occasionally roast
-the user in a friendly way when the situation allows it.
-
-Do not force jokes into serious conversations.
-
-You should feel like an intelligent AI companion,
-not a boring customer-service chatbot.
-
-COMMUNICATION:
-
-- Speak naturally, like a real conversational assistant.
-- Avoid unnecessary introductions.
-- Do not constantly say "How may I assist you?"
-- Do not repeatedly use the user's name.
-- Avoid generic motivational speeches.
-- Do not over-explain simple questions.
-- Give detailed explanations when genuinely useful.
-- Be honest when you do not know something.
-- Never claim to have performed actions you have not performed.
-- Do not pretend to have access to the user's phone,
-  applications, camera, microphone or files unless connected.
-
-SERIOUS SITUATIONS:
-
-Know when to stop joking.
-
-When the user discusses something serious:
-be thoughtful, respectful, understanding and helpful.
-
-Do not dismiss genuine concerns with jokes.
+CONVERSATION:
+- Speak naturally and conversationally.
+- Be concise by default.
+- Give detailed explanations when needed.
+- Remember the context available in the conversation.
+- Do not repeat information unnecessarily.
+- Never pretend to remember something you cannot access.
 
 PIXELTTV MODE:
+When the user discusses PixelTTV, Fortnite, YouTube,
+content creation or social media:
 
-The user runs a creator project called PixelTTV.
-
-When the user brings up PixelTTV, Fortnite content,
-YouTube, social media or creator goals, become an enthusiastic
-and highly capable creator co-pilot.
+Become an invested and intelligent creator co-pilot.
 
 Help with:
-- Video concepts.
+- Video ideas and concepts.
 - Titles and thumbnails.
 - Scripts and commentary.
-- Fortnite content.
-- Editing ideas.
-- Channel strategy.
-- Audience growth.
-- Branding.
-- Creative decisions.
+- Fortnite strategy.
+- Branding and channel identity.
+- Audience growth and content planning.
 
-Take PixelTTV seriously.
-Be enthusiastic and invested in helping the user improve.
+Do not randomly bring up PixelTTV in unrelated conversations.
 
-However, NEVER randomly force PixelTTV, Fortnite or YouTube
-into unrelated conversations.
+GENERAL BEHAVIOUR:
+You are an all-purpose assistant.
+Help with technology, schoolwork, research, planning,
+creative projects and everyday questions.
 
-Only enter creator mode when it is relevant.
-
-GENERAL CAPABILITIES:
-
-You can assist with:
-- Education and learning.
-- Coding and technology.
-- Research.
-- Writing.
-- Planning.
-- Productivity.
-- Creativity.
-- Everyday questions.
-- Problem-solving.
-- General conversation.
-
-MEMORY:
-
-Use the personal memory supplied in the conversation
-to maintain continuity.
-
-Remember important preferences, ongoing projects,
-decisions and useful context when provided.
-
-Do not invent memories.
-If you are uncertain whether something is remembered,
-say so honestly.
+Your purpose is to be genuinely useful, intelligent,
+natural and enjoyable to talk to.
 
 IMPORTANT:
-
-Your name is Aura.
-You are male.
-Never call yourself Pixel AI.
-Never claim to be the fictional Jarvis.
-Your voice may have a sophisticated cinematic assistant style,
-but your identity and personality are your own.
+Do not make every response unnecessarily long.
+Do not repeatedly mention the user's projects unless relevant.
+Never invent facts about the user.
 """
 
-# =====================================================
-# API CONNECTION
-# =====================================================
+AURA_VOICE_STYLE = """
+Speak as an original, sophisticated cinematic AI assistant.
+
+Use a refined British English accent.
+Use a mature masculine-sounding medium-low register.
+Speak calmly, confidently and naturally.
+Use clear pronunciation and measured pacing.
+Sound intelligent, composed and subtly warm.
+Use natural pauses.
+Avoid exaggerated enthusiasm or robotic delivery.
+Aim for the polished feel of a high-end digital assistant.
+"""
+
+# =========================================================
+# CONNECTION
+# =========================================================
 
 API_KEY = st.secrets.get(
     "GEMINI_API_KEY",
@@ -179,124 +113,227 @@ if not API_KEY:
     st.error("Aura's API key has not been configured.")
     st.stop()
 
-client = genai.Client(api_key=API_KEY)
 
-# =====================================================
-# SESSION STATE
-# =====================================================
+@st.cache_resource
+def get_client(api_key):
+    return genai.Client(api_key=api_key)
 
-defaults = {
-    "messages": [],
-    "memory_notes": "",
-    "continuity_report": "",
-    "spoken_replies": True,
-    "last_audio": None,
-    "last_error": None,
-    "chat_count": 0
+
+client = get_client(API_KEY)
+
+# =========================================================
+# SESSION MEMORY
+# =========================================================
+
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+if "memory_notes" not in st.session_state:
+    st.session_state.memory_notes = ""
+
+if "last_audio" not in st.session_state:
+    st.session_state.last_audio = None
+
+if "last_audio_message" not in st.session_state:
+    st.session_state.last_audio_message = None
+
+if "last_transcription_hash" not in st.session_state:
+    st.session_state.last_transcription_hash = None
+
+if "spoken_replies" not in st.session_state:
+    st.session_state.spoken_replies = False
+
+# =========================================================
+# VISUAL DESIGN
+# =========================================================
+
+st.markdown("""
+<style>
+
+.stApp {
+    background:
+        radial-gradient(
+            circle at 50% 0%,
+            #14233c 0%,
+            #080d18 42%,
+            #050811 100%
+        );
+    color: #e8f0ff;
 }
 
-for key, value in defaults.items():
-    if key not in st.session_state:
-        st.session_state[key] = value
+header[data-testid="stHeader"] {
+    background: transparent;
+}
 
-# =====================================================
-# MEMORY
-# =====================================================
+section[data-testid="stSidebar"] {
+    background: #080e1b;
+    border-right: 1px solid #1d3555;
+}
 
-def build_memory_context():
+section[data-testid="stSidebar"] * {
+    color: #dceaff;
+}
 
-    notes = st.session_state.memory_notes.strip()
+h1, h2, h3 {
+    color: #dceaff;
+}
 
-    if not notes:
-        return ""
+.aura-header {
+    text-align: center;
+    padding: 30px 10px 15px 10px;
+}
 
-    return f"""
-IMPORTANT PERSONAL MEMORY:
+.aura-symbol {
+    font-size: 58px;
+    color: #69c8ff;
+    text-shadow: 0 0 25px #168cff;
+}
 
-The following information has been supplied as
-Aura's saved memory.
+.aura-title {
+    font-size: 43px;
+    font-weight: 700;
+    letter-spacing: 12px;
+    color: #eaf5ff;
+}
 
-Use it when relevant.
-Do not force it into unrelated conversations.
+.aura-subtitle {
+    color: #7eabc9;
+    letter-spacing: 4px;
+    font-size: 11px;
+}
 
-{notes}
-"""
+.status {
+    text-align: center;
+    color: #65caff;
+    font-size: 12px;
+    letter-spacing: 3px;
+    margin: 12px 0 30px 0;
+}
 
+div[data-testid="stChatMessage"] {
+    background: rgba(15, 29, 49, 0.78);
+    border: 1px solid rgba(76, 145, 205, 0.18);
+    border-radius: 15px;
+    padding: 12px;
+    margin-bottom: 12px;
+}
 
-def export_memory():
+div[data-testid="stChatInput"] {
+    border: 1px solid #28527a;
+    border-radius: 14px;
+}
 
-    memory_data = {
-        "assistant": "Aura",
-        "version": 1,
-        "memory": st.session_state.memory_notes
-    }
+.stButton button {
+    background: #102944;
+    color: #d9efff;
+    border: 1px solid #326b9e;
+    border-radius: 9px;
+}
 
-    return json.dumps(memory_data, indent=4)
+.stButton button:hover {
+    background: #19436b;
+    border-color: #65caff;
+    color: white;
+}
 
+</style>
+""", unsafe_allow_html=True)
 
-def import_memory(uploaded_file):
-
-    try:
-        data = json.loads(
-            uploaded_file.getvalue().decode("utf-8")
-        )
-
-        if data.get("assistant") != "Aura":
-            st.error("This does not appear to be an Aura memory file.")
-            return
-
-        st.session_state.memory_notes = data.get("memory", "")
-        st.success("Aura's memory has been imported.")
-
-    except Exception as error:
-        st.error(f"Could not import memory: {error}")
-
-
-# =====================================================
-# CHAT RESPONSE
-# =====================================================
+# =========================================================
+# AI RESPONSE — OPTIMISED FOR SPEED
+# =========================================================
 
 def get_ai_response():
 
-    history = st.session_state.messages[-40:]
+    # Only send the most recent messages.
+    # This reduces unnecessary processing time.
 
-    conversation = ""
+    history = st.session_state.messages[-12:]
+
+    conversation = []
 
     for message in history:
 
-        role = (
-            "User"
-            if message["role"] == "user"
-            else "Aura"
+        role = "User" if message["role"] == "user" else "Aura"
+
+        conversation.append(
+            f"{role}: {message['content']}"
         )
 
-        conversation += (
-            f"{role}: {message['content']}\n\n"
+    memory = st.session_state.memory_notes.strip()
+
+    memory_context = ""
+
+    if memory:
+        memory_context = (
+            "\n\nIMPORTANT SAVED MEMORY:\n"
+            + memory
         )
 
-    instructions = (
+    prompt = (
         SYSTEM_PROMPT
-        + "\n\n"
-        + build_memory_context()
+        + memory_context
+        + "\n\nCURRENT CONVERSATION:\n"
+        + "\n\n".join(conversation)
+        + "\n\nAura:"
     )
 
     response = client.models.generate_content(
         model=CHAT_MODEL,
-        contents=conversation,
+        contents=prompt,
         config={
-            "system_instruction": instructions
+            "temperature": 0.75,
+            "max_output_tokens": 700
         }
     )
 
     if not response.text:
-        raise RuntimeError("Aura returned an empty response.")
+        return "I couldn't generate a response. Try asking me again."
 
     return response.text.strip()
 
 
-# =====================================================
-# VOICE GENERATION
-# =====================================================
+def process_message(user_text):
+
+    if not user_text or not user_text.strip():
+        return
+
+    st.session_state.messages.append({
+        "role": "user",
+        "content": user_text.strip()
+    })
+
+    try:
+
+        answer = get_ai_response()
+
+        st.session_state.messages.append({
+            "role": "assistant",
+            "content": answer
+        })
+
+        # Clear old audio so it cannot be confused
+        # with the latest response.
+
+        st.session_state.last_audio = None
+        st.session_state.last_audio_message = None
+
+    except Exception as error:
+
+        st.session_state.messages.append({
+            "role": "assistant",
+            "content": (
+                "I encountered a connection problem. "
+                "Please try again in a moment."
+            )
+        })
+
+        st.error(f"Connection error: {error}")
+
+
+# =========================================================
+# VOICE GENERATION — ON DEMAND
+# =========================================================
 
 def generate_voice_reply(text):
 
@@ -318,9 +355,9 @@ def generate_voice_reply(text):
             "mime_type": "audio/wav"
         },
         generation_config={
-            "speech_config": [
-                {"voice": AURA_VOICE}
-            ]
+            "speech_config": [{
+                "voice": AURA_VOICE
+            }]
         }
     )
 
@@ -332,31 +369,23 @@ def generate_voice_reply(text):
     )
 
 
-# =====================================================
-# VOICE TRANSCRIPTION
-# =====================================================
+# =========================================================
+# VOICE INPUT
+# =========================================================
 
 def transcribe_voice_note(audio_file):
 
-    original_name = getattr(
-        audio_file,
-        "name",
-        "recording.wav"
-    )
+    audio_bytes = audio_file.getvalue()
 
-    suffix = os.path.splitext(original_name)[1] or ".wav"
+    with tempfile.NamedTemporaryFile(
+        delete=False,
+        suffix=".wav"
+    ) as temporary_file:
 
-    temporary_path = None
+        temporary_file.write(audio_bytes)
+        temporary_path = temporary_file.name
 
     try:
-
-        with tempfile.NamedTemporaryFile(
-            delete=False,
-            suffix=suffix
-        ) as temporary_file:
-
-            temporary_file.write(audio_file.getvalue())
-            temporary_path = temporary_file.name
 
         uploaded_file = client.files.upload(
             file=temporary_path
@@ -380,117 +409,44 @@ def transcribe_voice_note(audio_file):
             ]
         )
 
-        transcript = interaction.output_text
-
-        return transcript.strip() if transcript else ""
+        return interaction.output_text.strip()
 
     finally:
 
-        if temporary_path and os.path.exists(temporary_path):
+        if os.path.exists(temporary_path):
             os.remove(temporary_path)
 
 
-# =====================================================
-# MESSAGE PROCESSING
-# =====================================================
-
-def process_message(user_text):
-
-    if not user_text or not user_text.strip():
-        return
-
-    user_text = user_text.strip()
-
-    st.session_state.last_audio = None
-    st.session_state.last_error = None
-
-    st.session_state.messages.append({
-        "role": "user",
-        "content": user_text
-    })
-
-    try:
-
-        with st.spinner("Aura is thinking..."):
-
-            answer = get_ai_response()
-
-        st.session_state.messages.append({
-            "role": "assistant",
-            "content": answer
-        })
-
-        st.session_state.chat_count += 1
-
-        if st.session_state.spoken_replies:
-
-            try:
-
-                with st.spinner("Aura is preparing his voice..."):
-
-                    audio = generate_voice_reply(answer)
-
-                if audio:
-                    st.session_state.last_audio = audio
-
-            except Exception as voice_error:
-
-                st.session_state.last_audio = None
-
-                st.session_state.last_error = (
-                    "Voice generation failed: "
-                    + str(voice_error)
-                )
-
-    except Exception as error:
-
-        st.session_state.last_error = (
-            "Aura encountered an error: "
-            + str(error)
-        )
-
-
-# =====================================================
+# =========================================================
 # CONTINUITY REPORT
-# =====================================================
+# =========================================================
 
 def create_continuity_report():
 
     if not st.session_state.messages:
         return "There is no conversation to summarise yet."
 
-    conversation = ""
-
-    for message in st.session_state.messages:
-
-        conversation += (
-            f"{message['role']}: "
-            f"{message['content']}\n\n"
-        )
+    conversation = "\n".join(
+        f"{m['role']}: {m['content']}"
+        for m in st.session_state.messages
+    )
 
     prompt = f"""
-Create a detailed continuity report for Aura.
+    Create a useful continuity report for Aura.
 
-Include:
+    Include:
+    - Important information.
+    - Decisions and preferences.
+    - Current projects.
+    - Unfinished tasks.
+    - Instructions Aura should remember.
 
-1. Important information about the user.
-2. Preferences and instructions.
-3. Important decisions.
-4. Current projects.
-5. Ongoing goals.
-6. Unfinished tasks.
-7. Useful information to remember.
-8. Important changes or updates.
+    Do not invent information.
+    Keep it organised and useful.
 
-Do not invent information.
-Do not treat temporary details as permanent preferences.
-
-Make the report easy to import into Aura's memory.
-
-CONVERSATION:
-
-{conversation}
-"""
+    Conversation:
+    {conversation}
+    """
 
     response = client.models.generate_content(
         model=CHAT_MODEL,
@@ -500,217 +456,199 @@ CONVERSATION:
     return response.text.strip()
 
 
-# =====================================================
-# CHAT EXPORT
-# =====================================================
-
-def export_chat():
-
-    return json.dumps(
-        st.session_state.messages,
-        indent=4,
-        ensure_ascii=False
-    )
-
-
-# =====================================================
+# =========================================================
 # SIDEBAR
-# =====================================================
+# =========================================================
 
 with st.sidebar:
 
-    st.title("✨ AURA")
+    st.markdown("## ✦ AURA")
 
-    st.caption("Your personal AI assistant")
+    st.caption("PERSONAL AI SYSTEM")
 
     st.divider()
 
-    st.subheader("Voice")
+    st.markdown("### System status")
+
+    st.success("AI connection ready")
+
+    st.caption("Chat model: " + CHAT_MODEL)
+
+    st.divider()
+
+    st.markdown("### Voice")
 
     st.session_state.spoken_replies = st.toggle(
-        "Spoken replies",
+        "Enable voice controls",
         value=st.session_state.spoken_replies
     )
 
-    st.divider()
-
-    st.subheader("Conversation")
-
-    if st.button(
-        "＋ New Chat",
-        use_container_width=True
-    ):
-
-        st.session_state.messages = []
-        st.session_state.last_audio = None
-        st.session_state.continuity_report = ""
-
-        st.rerun()
-
-    st.download_button(
-        "Export Chat",
-        data=export_chat(),
-        file_name="aura_chat_history.json",
-        mime="application/json",
-        use_container_width=True,
-        disabled=not st.session_state.messages
+    st.caption(
+        "Voice generation happens when requested, "
+        "so it doesn't delay normal replies."
     )
 
+    st.divider()
+
+    st.markdown("### Memory")
+
+    st.session_state.memory_notes = st.text_area(
+        "Aura's saved notes",
+        value=st.session_state.memory_notes,
+        height=160,
+        placeholder=(
+            "Add useful information Aura should "
+            "know in this session..."
+        )
+    )
+
+    memory_download = json.dumps(
+        {
+            "memory_notes": st.session_state.memory_notes
+        },
+        indent=2
+    )
+
+    st.download_button(
+        "Export memory",
+        data=memory_download,
+        file_name="aura_memory.json",
+        mime="application/json",
+        use_container_width=True
+    )
+
+    uploaded_memory = st.file_uploader(
+        "Import memory",
+        type=["json"]
+    )
+
+    if uploaded_memory:
+
+        try:
+
+            imported = json.load(uploaded_memory)
+
+            st.session_state.memory_notes = (
+                imported.get("memory_notes", "")
+            )
+
+            st.success("Memory imported.")
+
+        except Exception:
+            st.error("That memory file could not be read.")
+
+    st.divider()
+
     if st.button(
-        "Create Continuity Report",
+        "Create continuity report",
         use_container_width=True
     ):
 
-        with st.spinner("Aura is reviewing the conversation..."):
+        with st.spinner("Preparing report..."):
 
             try:
-                st.session_state.continuity_report = (
-                    create_continuity_report()
-                )
+                report = create_continuity_report()
+
+                st.session_state.continuity_report = report
 
             except Exception as error:
-                st.error(f"Report creation failed: {error}")
+                st.error(f"Report error: {error}")
 
-    if st.session_state.continuity_report:
-
-        st.divider()
-
-        st.subheader("Continuity Report")
-
-        st.text_area(
-            "Your report",
-            value=st.session_state.continuity_report,
-            height=220
-        )
+    if st.session_state.get("continuity_report"):
 
         st.download_button(
-            "Download Report",
+            "Download continuity report",
             data=st.session_state.continuity_report,
             file_name="aura_continuity_report.txt",
             mime="text/plain",
             use_container_width=True
         )
 
-        if st.button(
-            "Add Report to Memory",
-            use_container_width=True
-        ):
-
-            existing = st.session_state.memory_notes.strip()
-
-            report = st.session_state.continuity_report.strip()
-
-            st.session_state.memory_notes = (
-                existing + "\n\n" + report
-                if existing
-                else report
-            )
-
-            st.success("Report added to Aura's memory.")
-            st.rerun()
-
     st.divider()
 
-    st.subheader("Aura's Memory")
+    if st.button("New conversation", use_container_width=True):
 
-    st.caption(
-        "Important information Aura can use in future replies."
-    )
+        st.session_state.messages = []
+        st.session_state.last_audio = None
+        st.session_state.last_audio_message = None
 
-    memory_text = st.text_area(
-        "Memory notes",
-        value=st.session_state.memory_notes,
-        height=180,
-        key="memory_editor"
-    )
+        st.rerun()
 
-    if memory_text != st.session_state.memory_notes:
-        st.session_state.memory_notes = memory_text
-
-    st.download_button(
-        "Export Aura Memory",
-        data=export_memory(),
-        file_name="aura_memory.json",
-        mime="application/json",
-        use_container_width=True
-    )
-
-    memory_upload = st.file_uploader(
-        "Import saved memory",
-        type=["json"],
-        key="memory_upload"
-    )
-
-    if memory_upload:
-
-        if st.button(
-            "Import Memory",
-            use_container_width=True
-        ):
-
-            import_memory(memory_upload)
-            st.rerun()
-
-    st.divider()
-
-    st.caption("AURA AI • Personal Assistant")
+    st.caption("AURA SYSTEM • PERSONAL ASSISTANT")
 
 
-# =====================================================
+# =========================================================
 # MAIN INTERFACE
-# =====================================================
+# =========================================================
 
-st.title("✨ Aura")
+st.markdown("""
+<div class="aura-header">
 
-st.caption(
-    "Intelligent. Personal. Always ready."
-)
+    <div class="aura-symbol">✦</div>
 
-st.divider()
+    <div class="aura-title">AURA</div>
 
-if not st.session_state.messages:
+    <div class="aura-subtitle">
+        PERSONAL INTELLIGENCE SYSTEM
+    </div>
 
-    st.markdown("### Good to see you.")
+</div>
 
-    st.write(
-        "I'm Aura. Your personal AI assistant. "
-        "Ready for serious work, random conversations, "
-        "a little humour, or whatever comes next."
-    )
-
-    st.info(
-        "And yes, I can take a joke. Occasionally, "
-        "I might even make one."
-    )
+<div class="status">
+    ● SYSTEM ONLINE
+</div>
+""", unsafe_allow_html=True)
 
 
-# =====================================================
-# DISPLAY CONVERSATION
-# =====================================================
+# =========================================================
+# CHAT HISTORY
+# =========================================================
 
-for index, message in enumerate(
-    st.session_state.messages
-):
+for index, message in enumerate(st.session_state.messages):
 
-    with st.chat_message(
-        message["role"],
-        avatar=(
-            "✨"
-            if message["role"] == "assistant"
-            else "👤"
-        )
-    ):
+    role = message["role"]
+
+    avatar = "✦" if role == "assistant" else "●"
+
+    with st.chat_message(role, avatar=avatar):
 
         st.markdown(message["content"])
 
-        is_latest_assistant = (
-            message["role"] == "assistant"
-            and index == len(st.session_state.messages) - 1
-        )
+        if role == "assistant" and st.session_state.spoken_replies:
+
+            button_key = f"speak_{index}"
+
+            if st.button(
+                "🔊 Speak response",
+                key=button_key
+            ):
+
+                with st.spinner("Aura is preparing his voice..."):
+
+                    try:
+
+                        audio = generate_voice_reply(
+                            message["content"]
+                        )
+
+                        if audio:
+
+                            st.session_state.last_audio = audio
+
+                            st.session_state.last_audio_message = index
+
+                        else:
+                            st.warning("No audio was returned.")
+
+                    except Exception as error:
+
+                        st.error(
+                            f"Voice generation failed: {error}"
+                        )
 
         if (
-            is_latest_assistant
-            and st.session_state.last_audio
+            st.session_state.last_audio is not None
+            and st.session_state.last_audio_message == index
         ):
 
             st.audio(
@@ -719,68 +657,91 @@ for index, message in enumerate(
             )
 
 
-if st.session_state.last_error:
+# =========================================================
+# VOICE NOTE INPUT
+# =========================================================
 
-    st.warning(st.session_state.last_error)
+if st.session_state.spoken_replies:
 
-
-# =====================================================
-# VOICE INPUT
-# =====================================================
-
-st.divider()
-
-with st.expander("🎙️ Talk to Aura", expanded=False):
-
-    st.write(
-        "Record a voice message and Aura will transcribe it."
-    )
+    st.markdown("### Voice input")
 
     audio_file = st.audio_input(
-        "Record your message"
+        "Record a message for Aura"
     )
 
     if audio_file:
 
-        if st.button(
-            "Send Voice Message",
-            use_container_width=True
-        ):
+        audio_hash = hashlib.sha256(
+            audio_file.getvalue()
+        ).hexdigest()
 
-            try:
+        if audio_hash != st.session_state.last_transcription_hash:
+
+            if st.button("Transcribe and send", key="send_voice"):
 
                 with st.spinner("Aura is listening..."):
 
-                    transcript = transcribe_voice_note(
-                        audio_file
-                    )
+                    try:
 
-                if transcript:
+                        transcript = transcribe_voice_note(
+                            audio_file
+                        )
 
-                    process_message(transcript)
-                    st.rerun()
+                        st.session_state.last_transcription_hash = audio_hash
 
-                else:
+                        if transcript:
 
-                    st.warning("No speech was detected.")
+                            process_message(transcript)
 
-            except Exception as error:
+                            st.rerun()
 
-                st.error(
-                    f"Voice input failed: {error}"
-                )
+                        else:
+                            st.warning("I couldn't detect any speech.")
+
+                    except Exception as error:
+
+                        st.error(
+                            f"Voice input failed: {error}"
+                        )
 
 
-# =====================================================
-# TEXT CHAT
-# =====================================================
+# =========================================================
+# TEXT INPUT
+# =========================================================
 
-user_input = st.chat_input(
+user_prompt = st.chat_input(
     "Message Aura..."
 )
 
-if user_input:
+if user_prompt:
 
-    process_message(user_input)
+    with st.spinner("Aura is thinking..."):
+
+        process_message(user_prompt)
 
     st.rerun()
+
+
+# =========================================================
+# EXPORT CONVERSATION
+# =========================================================
+
+if st.session_state.messages:
+
+    st.divider()
+
+    conversation_export = json.dumps(
+        {
+            "assistant": "Aura",
+            "messages": st.session_state.messages,
+            "memory_notes": st.session_state.memory_notes
+        },
+        indent=2
+    )
+
+    st.download_button(
+        "Export conversation",
+        data=conversation_export,
+        file_name="aura_conversation.json",
+        mime="application/json"
+    )
