@@ -1,9 +1,10 @@
 """
-Aura - personal AI assistant (Streamlit prototype)
+Aura - personal AI assistant (Streamlit prototype, powered by Google Gemini)
 
-requirements.txt:  streamlit
-                   anthropic
-Secrets:           ANTHROPIC_API_KEY = "sk-ant-..."
+requirements.txt:  streamlit>=1.40.0
+                   google-genai>=2.25.0
+Secrets:           GEMINI_API_KEY = "your-key"
+                   (GOOGLE_API_KEY also works)
 """
 
 import datetime as dt
@@ -13,9 +14,11 @@ import re
 import uuid
 from pathlib import Path
 
-import anthropic
 import streamlit as st
 import streamlit.components.v1 as components
+from google import genai
+from google.genai import errors as genai_errors
+from google.genai import types
 
 st.set_page_config(page_title="Aura", page_icon="🔷", layout="centered")
 
@@ -33,9 +36,10 @@ def get_secret(name, default=None):
         return os.environ.get(name, default)
 
 
-MODEL = get_secret("AURA_MODEL", "claude-sonnet-5-5")
-FAST_MODEL = get_secret("AURA_FAST_MODEL", "claude-haiku-5-5")
-API_KEY = get_secret("ANTHROPIC_API_KEY")
+CHAT_MODEL = "gemini-3.5-flash-lite"
+MODEL = get_secret("AURA_MODEL", CHAT_MODEL)
+FAST_MODEL = get_secret("AURA_FAST_MODEL", CHAT_MODEL)
+API_KEY = get_secret("GEMINI_API_KEY") or get_secret("GOOGLE_API_KEY")
 
 SYSTEM_PROMPT = """You are Aura, a personal AI assistant. You are male (he/him).
 
@@ -203,11 +207,11 @@ def render_core(state="idle", label="Online"):
 def get_client():
     if not API_KEY:
         st.error(
-            "No API key found. Add ANTHROPIC_API_KEY under "
+            "No API key found. Add GEMINI_API_KEY under "
             "Manage app → Settings → Secrets."
         )
         st.stop()
-    return anthropic.Anthropic(api_key=API_KEY)
+    return genai.Client(api_key=API_KEY)
 
 
 def build_system():
@@ -217,32 +221,40 @@ def build_system():
     return f"{SYSTEM_PROMPT}\nCURRENT DATE/TIME: {now}\n\nREMEMBERED FACTS ABOUT THE USER:\n{mem}"
 
 
+def to_contents(messages):
+    """Convert stored messages to Gemini's format (assistant role is called 'model')."""
+    return [
+        types.Content(
+            role="model" if m["role"] == "assistant" else "user",
+            parts=[types.Part(text=m["content"])],
+        )
+        for m in messages[-30:]
+    ]
+
+
 def stream_reply(client, messages):
-    with client.messages.stream(
+    stream = client.models.generate_content_stream(
         model=MODEL,
-        max_tokens=1500,
-        system=build_system(),
-        messages=messages[-30:],
-    ) as stream:
-        for chunk in stream.text_stream:
-            yield chunk
+        contents=to_contents(messages),
+        config=types.GenerateContentConfig(system_instruction=build_system()),
+    )
+    for chunk in stream:
+        if chunk.text:
+            yield chunk.text
 
 
 def extract_facts(client, user_msg, reply):
     known = "\n".join(f"- {f['text']}" for f in data["facts"]) or "(none)"
     try:
-        r = client.messages.create(
+        r = client.models.generate_content(
             model=FAST_MODEL,
-            max_tokens=300,
-            system=EXTRACT_PROMPT,
-            messages=[
-                {
-                    "role": "user",
-                    "content": f"KNOWN FACTS:\n{known}\n\nUSER SAID:\n{user_msg}\n\nASSISTANT REPLIED:\n{reply}",
-                }
-            ],
+            contents=f"KNOWN FACTS:\n{known}\n\nUSER SAID:\n{user_msg}\n\nASSISTANT REPLIED:\n{reply}",
+            config=types.GenerateContentConfig(
+                system_instruction=EXTRACT_PROMPT,
+                response_mime_type="application/json",
+            ),
         )
-        text = r.content[0].text
+        text = r.text or "[]"
         start, end = text.find("["), text.rfind("]")
         items = json.loads(text[start : end + 1])
         existing = {f["text"].lower() for f in data["facts"]}
@@ -362,7 +374,7 @@ if prompt:
         with st.chat_message("assistant", avatar=AURA_AVATAR):
             core_slot.markdown(render_core("speaking", "Responding"), unsafe_allow_html=True)
             reply = st.write_stream(stream_reply(client, convo["messages"]))
-    except anthropic.APIError as e:
+    except genai_errors.APIError as e:
         core_slot.markdown(render_core("idle", "Connection fault"), unsafe_allow_html=True)
         convo["messages"].pop()
         st.error(f"Couldn't reach the model: {e}")
