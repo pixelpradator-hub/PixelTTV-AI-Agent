@@ -2,8 +2,7 @@
 import os
 import json
 import uuid
-import re
-import html
+import hashlib
 from pathlib import Path
 from datetime import datetime
 
@@ -26,13 +25,16 @@ st.set_page_config(
 
 CHAT_MODEL = "gemini-3.5-flash-lite"
 MEMORY_MODEL = "gemini-3.5-flash-lite"
+
 DATA_FILE = Path(__file__).parent / "aura_data.json"
+
 MAX_HISTORY = 20
 MEMORY_INTERVAL = 4
+MAX_MEMORIES = 100
 
 
 # =========================================================
-# AURA DESIGN
+# DESIGN
 # =========================================================
 
 st.markdown("""
@@ -82,7 +84,7 @@ h1, h2, h3 {
 .aura-orb-wrap {
     display: flex;
     justify-content: center;
-    padding: 15px 0 25px 0;
+    padding: 15px 0 25px;
 }
 
 .aura-orb {
@@ -155,6 +157,20 @@ footer {
 
 
 # =========================================================
+# SESSION STATE
+# =========================================================
+
+if "voice_enabled" not in st.session_state:
+    st.session_state.voice_enabled = True
+
+if "last_audio_hash" not in st.session_state:
+    st.session_state.last_audio_hash = None
+
+if "data" not in st.session_state:
+    st.session_state.data = None
+
+
+# =========================================================
 # DATA STORAGE
 # =========================================================
 
@@ -200,42 +216,20 @@ def save_data():
             )
 
         temporary_file.replace(DATA_FILE)
+        return True
 
     except Exception as error:
         st.warning(f"Could not save Aura's data: {error}")
+        return False
 
 
-if "data" not in st.session_state:
+if st.session_state.data is None:
     st.session_state.data = load_data()
-
-if "voice_enabled" not in st.session_state:
-    st.session_state.voice_enabled = True
-
-if "processing" not in st.session_state:
-    st.session_state.processing = False
-
-if "last_audio_hash" not in st.session_state:
-    st.session_state.last_audio_hash = None
 
 
 # =========================================================
 # CHAT MANAGEMENT
 # =========================================================
-
-def get_active_chat():
-    data = st.session_state.data
-    active_id = data.get("active_chat")
-
-    for chat in data["chats"]:
-        if chat["id"] == active_id:
-            return chat
-
-    if data["chats"]:
-        data["active_chat"] = data["chats"][-1]["id"]
-        return data["chats"][-1]
-
-    return create_new_chat()
-
 
 def create_new_chat():
     chat = {
@@ -252,12 +246,30 @@ def create_new_chat():
     return chat
 
 
+def get_active_chat():
+    data = st.session_state.data
+    active_id = data.get("active_chat")
+
+    for chat in data["chats"]:
+        if chat.get("id") == active_id:
+            chat.setdefault("messages", [])
+            chat.setdefault("title", "New conversation")
+            return chat
+
+    if data["chats"]:
+        chat = data["chats"][-1]
+        data["active_chat"] = chat["id"]
+        return chat
+
+    return create_new_chat()
+
+
 def delete_chat(chat_id):
     data = st.session_state.data
 
     data["chats"] = [
         chat for chat in data["chats"]
-        if chat["id"] != chat_id
+        if chat.get("id") != chat_id
     ]
 
     if data["active_chat"] == chat_id:
@@ -286,7 +298,10 @@ def get_api_key():
     except Exception:
         pass
 
-    return os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+    return (
+        os.getenv("GEMINI_API_KEY")
+        or os.getenv("GOOGLE_API_KEY")
+    )
 
 
 @st.cache_resource
@@ -314,38 +329,37 @@ AURA_SYSTEM_PROMPT = """
 You are AURA, a sophisticated personal AI assistant.
 
 IDENTITY:
-- You are male. Use he/him pronouns if referring to yourself.
+- You are male. Use he/him pronouns when referring to yourself.
 - You have your own original identity.
-- You are inspired by the experience of a futuristic personal assistant,
-  but you are not a fictional character.
-- Your personality is intelligent, composed, confident and articulate.
+- You are inspired by the experience of a futuristic personal
+  assistant, but you are not a fictional character.
 
 PERSONALITY:
-- You are witty, occasionally sarcastic and naturally funny.
+- Intelligent, composed, confident and articulate.
+- Witty, occasionally sarcastic and naturally funny.
 - You can lightly roast the user when appropriate.
 - You have opinions and can respectfully disagree.
-- You think analytically and explain your reasoning clearly.
+- You think analytically and explain problems clearly.
 - You know when to stop joking and become serious.
-- You speak naturally, like a highly capable colleague.
+- Speak naturally, like a highly capable colleague.
 - Avoid generic customer-service language.
 - Do not constantly introduce yourself.
-- Do not give unnecessary motivational speeches.
+- Avoid unnecessary motivational speeches.
 
-VOICE AND RESPONSE STYLE:
-- Your voice identity is mature, masculine and refined.
+VOICE:
+- Your intended voice identity is mature, masculine and refined.
 - Your intended accent is British English.
-- Keep ordinary responses concise.
-- Give detailed explanations when the situation needs them.
-- Never pretend that you have performed an action you cannot perform.
+- Write naturally for spoken conversation.
+- Avoid excessive formatting in ordinary spoken replies.
 
 GENERAL ASSISTANCE:
 You are an all-purpose assistant.
-Help with schoolwork, technology, programming, research, planning,
-problem-solving and everyday questions.
+Help with schoolwork, technology, programming, research,
+planning, problem-solving and everyday questions.
 
 PIXELTTV MODE:
-Only activate creator-focused assistance when the user brings up
-PixelTTV, Fortnite, YouTube or content creation.
+Only activate creator-focused assistance when the user brings
+up PixelTTV, Fortnite, YouTube or content creation.
 When relevant, act as an invested creator co-pilot.
 Do not force Fortnite or PixelTTV into unrelated conversations.
 
@@ -354,7 +368,7 @@ You have access to saved information about the user.
 Use relevant memories naturally.
 Do not repeatedly announce that you remember something.
 Never invent personal information.
-If you are uncertain, ask rather than pretend to remember.
+If uncertain, ask rather than pretending to remember.
 
 IMPORTANT:
 You are Aura. Speak as Aura.
@@ -378,13 +392,11 @@ def memory_context():
 
 def extract_memories(chat):
     """
-    Extract useful long-term facts occasionally,
-    rather than making a second API request after every message.
+    Extract useful long-term information periodically.
+    This avoids an additional Gemini request after every message.
     """
 
-    messages = chat.get("messages", [])
-
-    recent_messages = messages[-10:]
+    recent_messages = chat.get("messages", [])[-12:]
 
     conversation = "\n".join(
         f"{message['role']}: {message['content']}"
@@ -395,7 +407,7 @@ def extract_memories(chat):
 Identify useful long-term information about the user
 that should be remembered for future conversations.
 
-Only save information that is genuinely useful later:
+Save only genuinely useful information:
 - Preferences
 - Long-term projects
 - Important goals
@@ -441,18 +453,17 @@ If there is nothing useful to remember, return [].
             if item and item not in existing:
                 existing.append(item)
 
-        # Keep memory collection manageable.
-        st.session_state.data["memories"] = existing[-100:]
+        st.session_state.data["memories"] = existing[-MAX_MEMORIES:]
 
         save_data()
 
     except Exception:
-        # Memory extraction should never break a conversation.
+        # Memory extraction must never break a conversation.
         pass
 
 
 # =========================================================
-# AURA'S CHAT RESPONSE
+# BUILD CHAT PROMPT
 # =========================================================
 
 def build_prompt(chat):
@@ -468,16 +479,26 @@ CONVERSATION:
 """
 
     for message in messages:
-        role = "USER" if message["role"] == "user" else "AURA"
-        prompt += f"\n{role}: {message['content']}\n"
+        role = (
+            "USER"
+            if message["role"] == "user"
+            else "AURA"
+        )
+
+        prompt += (
+            f"\n{role}: {message['content']}\n"
+        )
 
     prompt += "\nAURA:"
     return prompt
 
 
+# =========================================================
+# GENERATE RESPONSE
+# =========================================================
+
 def generate_response(chat, placeholder):
     prompt = build_prompt(chat)
-
     response_text = ""
 
     try:
@@ -495,18 +516,23 @@ def generate_response(chat, placeholder):
                 response_text += chunk.text
                 placeholder.markdown(response_text + " ▌")
 
+        response_text = response_text.strip()
+
+        if not response_text:
+            placeholder.warning(
+                "I didn't receive a response. Please try again."
+            )
+            return None
+
         placeholder.markdown(response_text)
-
-        if not response_text.strip():
-            return "I didn't receive a response. Try that again."
-
-        return response_text.strip()
+        return response_text
 
     except Exception as error:
         placeholder.error(
             "I encountered a problem connecting to Gemini. "
-            "Please try again in a moment."
+            "Please try again."
         )
+
         st.error(f"Technical details: {error}")
         return None
 
@@ -517,7 +543,7 @@ def generate_response(chat, placeholder):
 
 def transcribe_audio(audio_file):
     """
-    Send recorded audio to Gemini for transcription.
+    Send a recorded audio message to Gemini for transcription.
     """
 
     try:
@@ -551,9 +577,8 @@ def transcribe_audio(audio_file):
 
 def speak_response(text):
     """
-    Use the browser's available speech voices.
-    Prefer British English voices and suitable masculine-sounding
-    voice names when available.
+    Use the browser's available speech synthesis voices.
+    Prefer British English voices where available.
     """
 
     safe_text = json.dumps(text).replace("<", "\\u003c")
@@ -577,8 +602,8 @@ def speak_response(text):
         );
 
         const preferredNames = [
-            "daniel", "george", "arthur", "oliver",
-            "ryan", "alfie", "male"
+            "daniel", "george", "arthur",
+            "oliver", "ryan", "alfie"
         ];
 
         let selectedVoice = null;
@@ -587,6 +612,7 @@ def speak_response(text):
             selectedVoice = britishVoices.find(v =>
                 v.name.toLowerCase().includes(name)
             );
+
             if (selectedVoice) break;
         }}
 
@@ -632,26 +658,34 @@ def send_message(user_text, is_voice=False):
 
     chat = get_active_chat()
 
-    chat["messages"].append({
+    user_message = {
         "role": "user",
         "content": user_text,
         "timestamp": datetime.now().isoformat(),
         "source": "voice" if is_voice else "text"
-    })
+    }
+
+    chat["messages"].append(user_message)
 
     if chat["title"] == "New conversation":
         chat["title"] = user_text[:38]
 
     save_data()
 
-    with st.chat_message("user", avatar="🎙️" if is_voice else "👤"):
+    with st.chat_message(
+        "user",
+        avatar="👤"
+    ):
         if is_voice:
             st.caption("Voice message")
+
         st.markdown(user_text)
 
-    with st.chat_message("assistant", avatar="✦"):
+    with st.chat_message(
+        "assistant",
+        avatar="🤖"
+    ):
         placeholder = st.empty()
-
         answer = generate_response(chat, placeholder)
 
     if answer is None:
@@ -667,7 +701,7 @@ def send_message(user_text, is_voice=False):
 
     save_data()
 
-    # Extract useful memories periodically.
+    # Extract memories periodically.
     user_message_count = sum(
         1 for message in chat["messages"]
         if message["role"] == "user"
@@ -700,27 +734,35 @@ with st.sidebar:
 
     st.divider()
 
-    if st.button("＋ New conversation", use_container_width=True):
+    if st.button(
+        "＋ New conversation",
+        use_container_width=True
+    ):
         create_new_chat()
         st.rerun()
 
     st.markdown("### Conversation history")
 
-    for chat in reversed(st.session_state.data["chats"]):
+    for chat_item in reversed(
+        st.session_state.data["chats"]
+    ):
         col1, col2 = st.columns([5, 1])
 
         with col1:
             if st.button(
-                chat["title"][:28],
-                key=f"chat_{chat['id']}",
+                chat_item["title"][:28],
+                key=f"chat_{chat_item['id']}",
                 use_container_width=True
             ):
-                st.session_state.data["active_chat"] = chat["id"]
+                st.session_state.data["active_chat"] = chat_item["id"]
                 st.rerun()
 
         with col2:
-            if st.button("×", key=f"delete_{chat['id']}"):
-                delete_chat(chat["id"])
+            if st.button(
+                "×",
+                key=f"delete_{chat_item['id']}"
+            ):
+                delete_chat(chat_item["id"])
                 st.rerun()
 
     st.divider()
@@ -739,7 +781,9 @@ with st.sidebar:
             if new_memory.strip():
                 if new_memory.strip() not in memories:
                     memories.append(new_memory.strip())
+                    st.session_state.data["memories"] = memories[-MAX_MEMORIES:]
                     save_data()
+
                 st.rerun()
 
         for index, memory in enumerate(memories):
@@ -749,7 +793,10 @@ with st.sidebar:
                 st.caption(memory)
 
             with col2:
-                if st.button("×", key=f"memory_{index}"):
+                if st.button(
+                    "×",
+                    key=f"memory_{index}"
+                ):
                     memories.pop(index)
                     save_data()
                     st.rerun()
@@ -782,7 +829,11 @@ with st.sidebar:
 # MAIN INTERFACE
 # =========================================================
 
-st.markdown('<div class="aura-heading">A U R A</div>', unsafe_allow_html=True)
+st.markdown(
+    '<div class="aura-heading">A U R A</div>',
+    unsafe_allow_html=True
+)
+
 st.markdown(
     '<div class="aura-subtitle">PERSONAL INTELLIGENCE SYSTEM</div>',
     unsafe_allow_html=True
@@ -794,13 +845,24 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
+
+# =========================================================
+# DISPLAY ACTIVE CONVERSATION
+# =========================================================
+
 chat = get_active_chat()
 
-# Display existing conversation.
 for message in chat["messages"]:
-    avatar = "👤" if message["role"] == "user" else "✦"
+    avatar = (
+        "👤"
+        if message["role"] == "user"
+        else "🤖"
+    )
 
-    with st.chat_message(message["role"], avatar=avatar):
+    with st.chat_message(
+        message["role"],
+        avatar=avatar
+    ):
         if message.get("source") == "voice":
             st.caption("Voice message")
 
@@ -808,11 +870,10 @@ for message in chat["messages"]:
 
 
 # =========================================================
-# INPUT AREA
+# VOICE INPUT
 # =========================================================
 
 st.divider()
-
 st.markdown("### Speak to Aura")
 
 audio_file = st.audio_input(
@@ -821,9 +882,10 @@ audio_file = st.audio_input(
 )
 
 if audio_file:
-    if st.button("🎙️ Send voice message", use_container_width=True):
-        import hashlib
-
+    if st.button(
+        "🎙️ Send voice message",
+        use_container_width=True
+    ):
         audio_bytes = audio_file.getvalue()
         audio_hash = hashlib.sha256(audio_bytes).hexdigest()
 
@@ -836,11 +898,19 @@ if audio_file:
             if transcription:
                 st.caption(f"You said: {transcription}")
                 send_message(transcription, is_voice=True)
+
         else:
             st.info("That recording has already been sent.")
 
 
+# =========================================================
+# TEXT INPUT
+# =========================================================
+
 text_message = st.chat_input("Message Aura...")
 
 if text_message:
-    send_message(text_message, is_voice=False)
+    send_message(
+        text_message,
+        is_voice=False
+    )
