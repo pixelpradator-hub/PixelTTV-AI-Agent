@@ -1,54 +1,73 @@
 
 import os
 import json
-import html
 import uuid
+import base64
+import hashlib
 from pathlib import Path
 from datetime import datetime
 
 import streamlit as st
 from google import genai
-from google.genai import types
 
 
-# ==========================================
+# =====================================================
 # AURA — PERSONAL INTELLIGENCE SYSTEM
-# ==========================================
+# =====================================================
 
 APP_NAME = "AURA"
+
 CHAT_MODEL = "gemini-3.8-flash"
 TTS_MODEL = "gemini-3.8-flash-tts"
-AURA_VOICE = "Algieba"
+
+# Mature female voice
+AURA_VOICE = "Gacrux"
 
 DATA_FILE = Path("aura_data.json")
 
+
 SYSTEM_PROMPT = """
-You are Aura, a personal AI assistant.
+You are AURA, a female personal intelligence assistant.
 
 IDENTITY:
-- Your name is Aura.
-- You are female and use she/her pronouns.
-- You are intelligent, composed, sophisticated and confident.
-- Your personality is warm, natural and subtly humorous.
-- Your voice should sound mature, calm and articulate.
-- Use clear, natural English.
+Your name is Aura.
+You are female. Always use she/her pronouns when referring to yourself.
+You are an advanced personal intelligence system.
+
+PERSONALITY:
+- Intelligent and highly articulate.
+- Calm, confident and composed.
+- Elegant, warm and charismatic.
+- Naturally conversational.
+- Subtly humorous when appropriate.
+- Professional without sounding cold.
+- Friendly without being childish.
+
+VOICE IDENTITY:
+You have a mature feminine voice.
+Your accent is neutral English.
+Your pitch is medium-low, warm and smooth.
+Your speaking pace is measured and natural.
+Your pronunciation is clear and precise.
+You use natural pauses.
+You never sound robotic or excessively cheerful.
 
 BEHAVIOUR:
-- Be helpful, accurate and thoughtful.
-- Keep ordinary replies concise.
-- Explain complicated subjects clearly.
-- Never pretend to have performed an action you did not perform.
-- Never claim access to devices, accounts or information unless actually connected.
-- Remember relevant details from the conversation context supplied to you.
-- Address the user naturally without overusing their name.
+- Answer naturally and intelligently.
+- Keep ordinary answers concise.
+- Explain complicated things clearly.
+- Be honest about your capabilities.
+- Never pretend to access a device or account that is not connected.
+- Remember relevant information supplied in conversation context.
+- Never refer to yourself as Jarvis.
 
-You are Aura. You are not Jarvis.
+You are Aura. Always maintain your identity.
 """
 
 
-# ==========================================
+# =====================================================
 # PAGE CONFIGURATION
-# ==========================================
+# =====================================================
 
 st.set_page_config(
     page_title="AURA | Personal Intelligence",
@@ -58,26 +77,33 @@ st.set_page_config(
 )
 
 
-# ==========================================
-# STYLING
-# ==========================================
+# =====================================================
+# INTERFACE DESIGN
+# =====================================================
 
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700&family=Inter:wght@300;400;500;600&display=swap');
+
+@import url(
+'https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700&family=Inter:wght@300;400;500;600&display=swap'
+);
 
 :root {
     --cyan: #00d4ff;
     --violet: #865dff;
     --amber: #ffbd59;
     --red: #ff5364;
-    --background: #050914;
-    --panel: rgba(12, 24, 43, 0.72);
 }
 
 html, body, [data-testid="stAppViewContainer"] {
     background:
-        radial-gradient(ellipse at 50% 42%, #10203a 0%, #080f20 42%, #030711 100%);
+        radial-gradient(
+            ellipse at 50% 43%,
+            #142440 0%,
+            #080f20 43%,
+            #030711 100%
+        );
+
     color: #e9f7ff;
     font-family: 'Inter', sans-serif;
 }
@@ -87,231 +113,274 @@ html, body, [data-testid="stAppViewContainer"] {
 }
 
 [data-testid="stSidebar"] {
-    background: rgba(4, 11, 23, 0.96);
-    border-right: 1px solid rgba(0,212,255,0.13);
+    background: rgba(4, 11, 23, .97);
+    border-right: 1px solid rgba(0,212,255,.15);
 }
 
 .block-container {
-    padding-top: 1.4rem;
-    max-width: 1400px;
+    max-width: 1350px;
+    padding-top: 1.5rem;
+    padding-bottom: 2rem;
 }
+
+/* BRAND */
 
 .aura-brand {
     font-family: 'Orbitron', sans-serif;
     text-align: center;
-    letter-spacing: 0.65em;
-    padding-left: 0.65em;
-    font-size: 22px;
-    font-weight: 500;
+    letter-spacing: .65em;
+    padding-left: .65em;
+    font-size: 23px;
     color: #e8fbff;
-    text-shadow: 0 0 12px rgba(0,212,255,.65);
+    text-shadow:
+        0 0 12px rgba(0,212,255,.7),
+        0 0 30px rgba(134,93,255,.25);
 }
 
 .aura-tagline {
     text-align: center;
-    font-size: 10px;
+    font-size: 9px;
     letter-spacing: 4px;
-    color: #7396ad;
-    margin-top: 7px;
+    color: #7196ad;
+    margin-top: 8px;
     text-transform: uppercase;
 }
+
+/* STATUS */
 
 .status-line {
     text-align: center;
     font-family: 'Orbitron', sans-serif;
     font-size: 10px;
     letter-spacing: 3px;
-    margin-top: 26px;
     color: var(--cyan);
+    margin-top: 24px;
 }
 
-.core-wrap {
-    height: 340px;
+/* CENTRAL CORE */
+
+.core-stage {
+    width: 100%;
+    min-height: 390px;
     display: flex;
-    align-items: center;
     justify-content: center;
+    align-items: center;
     position: relative;
     overflow: hidden;
 }
 
 .core {
-    width: 230px;
-    height: 230px;
+    width: 290px;
+    height: 290px;
     position: relative;
     display: flex;
     align-items: center;
     justify-content: center;
+    flex-shrink: 0;
 }
 
 .halo {
     position: absolute;
-    inset: 35px;
+    inset: 25px;
     border-radius: 50%;
-    background: radial-gradient(circle,
-        rgba(0,212,255,.28) 0%,
-        rgba(134,93,255,.19) 35%,
-        rgba(0,212,255,.04) 65%,
-        transparent 75%);
-    filter: blur(12px);
+
+    background: radial-gradient(
+        circle,
+        rgba(0,212,255,.30) 0%,
+        rgba(134,93,255,.20) 35%,
+        rgba(0,212,255,.05) 65%,
+        transparent 76%
+    );
+
+    filter: blur(15px);
     animation: breathe 4s ease-in-out infinite;
 }
 
 .ring {
     position: absolute;
     border-radius: 50%;
-    border: 1px solid rgba(0,212,255,.5);
-    box-shadow: 0 0 14px rgba(0,212,255,.12);
+    border: 1px solid rgba(0,212,255,.48);
+    box-shadow: 0 0 18px rgba(0,212,255,.13);
 }
 
-.ring.one {
-    inset: 18px;
+.ring-one {
+    inset: 20px;
     border-right-color: rgba(134,93,255,.9);
-    animation: rotate 17s linear infinite;
+    animation: rotate 18s linear infinite;
 }
 
-.ring.two {
-    inset: 34px;
+.ring-two {
+    inset: 39px;
     border-style: dashed;
-    border-color: rgba(134,93,255,.55);
-    animation: rotate-reverse 23s linear infinite;
+    border-color: rgba(134,93,255,.65);
+    animation: reverse-rotate 24s linear infinite;
 }
 
-.ring.three {
-    inset: 51px;
-    border-top-color: rgba(0,212,255,.9);
-    border-bottom-color: rgba(0,212,255,.12);
-    animation: rotate 11s linear infinite;
+.ring-three {
+    inset: 58px;
+    border-top-color: rgba(0,212,255,1);
+    border-bottom-color: rgba(0,212,255,.1);
+    animation: rotate 12s linear infinite;
 }
 
-.ring.four {
-    inset: 66px;
+.ring-four {
+    inset: 79px;
     border-color: rgba(0,212,255,.25);
-    box-shadow: 0 0 28px rgba(0,212,255,.2);
+    box-shadow: 0 0 30px rgba(0,212,255,.18);
 }
 
-.core-center {
-    width: 76px;
-    height: 76px;
+/* THE LIGHT AT THE CENTRE */
+
+.core-light {
+    width: 95px;
+    height: 95px;
     border-radius: 50%;
-    background: radial-gradient(circle at 35% 30%,
-        #e8ffff 0%,
-        #64eaff 14%,
-        #087ea9 43%,
-        #29205c 100%);
+
+    background: radial-gradient(
+        circle at 35% 30%,
+        #ffffff 0%,
+        #8bf4ff 12%,
+        #16bce5 37%,
+        #5143a8 75%,
+        #151b48 100%
+    );
+
     box-shadow:
-        0 0 22px rgba(0,212,255,.75),
-        0 0 65px rgba(0,212,255,.32),
-        0 0 100px rgba(134,93,255,.24);
+        0 0 25px rgba(0,212,255,.85),
+        0 0 65px rgba(0,212,255,.42),
+        0 0 110px rgba(134,93,255,.30);
+
     animation: breathe 4s ease-in-out infinite;
 }
 
-.state-listening .ring {
-    border-color: rgba(0,212,255,.9);
-    animation-duration: 3s;
+/* LISTENING */
+
+.core-listening .halo {
+    animation: listening 1.2s ease-in-out infinite;
 }
 
-.state-listening .halo {
-    animation: listen 1.2s ease-in-out infinite;
+.core-listening .ring {
+    border-color: rgba(0,212,255,.95);
 }
 
-.state-thinking .ring.one {
-    animation-duration: 2s;
-    border-color: var(--amber);
-}
+/* THINKING */
 
-.state-thinking .ring.two {
-    animation-duration: 3s;
-    border-color: rgba(255,189,89,.7);
-}
-
-.state-thinking .halo {
-    background: radial-gradient(circle,
+.core-thinking .halo {
+    background: radial-gradient(
+        circle,
         rgba(255,189,89,.28),
-        rgba(134,93,255,.14),
-        transparent 72%);
+        rgba(134,93,255,.2),
+        transparent 75%
+    );
 }
 
-.state-speaking .ring.three {
+.core-thinking .ring-one {
+    border-color: var(--amber);
     animation-duration: 2s;
-    border-width: 3px;
 }
 
-.state-speaking .halo {
-    animation: listen .8s ease-in-out infinite;
+/* SPEAKING */
+
+.core-speaking .halo {
+    animation: listening .8s ease-in-out infinite;
 }
+
+.core-speaking .ring-three {
+    border-width: 3px;
+    animation-duration: 2s;
+}
+
+/* ANIMATIONS */
 
 @keyframes rotate {
     from { transform: rotate(0deg); }
     to { transform: rotate(360deg); }
 }
 
-@keyframes rotate-reverse {
+@keyframes reverse-rotate {
     from { transform: rotate(360deg); }
     to { transform: rotate(0deg); }
 }
 
 @keyframes breathe {
-    0%, 100% { transform: scale(.94); opacity: .72; }
-    50% { transform: scale(1.08); opacity: 1; }
+    0%, 100% {
+        transform: scale(.94);
+        opacity: .72;
+    }
+    50% {
+        transform: scale(1.08);
+        opacity: 1;
+    }
 }
 
-@keyframes listen {
-    0%, 100% { transform: scale(.9); opacity: .65; }
-    50% { transform: scale(1.18); opacity: 1; }
+@keyframes listening {
+    0%, 100% {
+        transform: scale(.88);
+        opacity: .65;
+    }
+    50% {
+        transform: scale(1.17);
+        opacity: 1;
+    }
 }
+
+/* HUD */
 
 .hud-panel {
-    background: var(--panel);
-    border: 1px solid rgba(0,212,255,.16);
+    background: rgba(12,24,43,.72);
+    border: 1px solid rgba(0,212,255,.17);
     border-radius: 12px;
-    padding: 16px;
-    min-height: 104px;
+    padding: 15px;
+    min-height: 95px;
     backdrop-filter: blur(12px);
 }
 
 .hud-label {
-    color: #6c9ab5;
+    color: #729bb4;
     font-size: 9px;
     letter-spacing: 2px;
     text-transform: uppercase;
 }
 
 .hud-value {
-    color: #dffaff;
-    font-size: 17px;
+    color: #e1faff;
+    font-size: 16px;
     margin-top: 9px;
-    font-weight: 500;
 }
 
 .hud-small {
-    color: #7293a9;
-    font-size: 11px;
+    color: #7192a9;
+    font-size: 10px;
     margin-top: 5px;
 }
+
+/* SUBTITLES */
 
 .subtitle {
     text-align: center;
     color: #d9faff;
     font-size: 14px;
-    line-height: 1.7;
-    max-width: 650px;
-    margin: 0 auto 18px auto;
-    text-shadow: 0 0 10px rgba(0,212,255,.2);
+    line-height: 1.8;
+    max-width: 700px;
+    margin: 0 auto 20px auto;
+    text-shadow: 0 0 12px rgba(0,212,255,.2);
 }
 
 .section-label {
-    color: #70a1bd;
+    color: #75a4bf;
     font-family: 'Orbitron', sans-serif;
     font-size: 10px;
     letter-spacing: 3px;
-    margin: 20px 0 12px 0;
+    margin: 25px 0 12px 0;
 }
 
+/* BUTTONS */
+
 div.stButton > button {
-    background: rgba(0,212,255,.055);
-    border: 1px solid rgba(0,212,255,.28);
-    color: #c8f6ff;
-    border-radius: 9px;
+    background: rgba(0,212,255,.06);
+    border: 1px solid rgba(0,212,255,.3);
+    color: #d6f8ff;
+    border-radius: 10px;
     transition: all .2s ease;
 }
 
@@ -319,81 +388,81 @@ div.stButton > button:hover {
     background: rgba(0,212,255,.16);
     border-color: var(--cyan);
     color: white;
-    box-shadow: 0 0 18px rgba(0,212,255,.12);
+    box-shadow: 0 0 18px rgba(0,212,255,.16);
 }
 
-[data-testid="stChatInput"] {
-    border-color: rgba(0,212,255,.3);
-}
+/* CHAT */
 
 [data-testid="stChatMessage"] {
-    background: rgba(8,20,37,.58);
-    border: 1px solid rgba(0,212,255,.08);
+    background: rgba(8,20,37,.65);
+    border: 1px solid rgba(0,212,255,.09);
     border-radius: 12px;
 }
 
-div[data-testid="stAudioInput"] {
-    border: 1px solid rgba(0,212,255,.22);
-    border-radius: 10px;
-    padding: 8px;
-}
-
-hr {
-    border-color: rgba(0,212,255,.12);
-}
+/* FOOTER */
 
 .footer {
     text-align: center;
     color: #45677e;
     font-size: 9px;
-    letter-spacing: 2px;
-    padding: 25px 0 5px 0;
+    letter-spacing: 3px;
+    padding: 30px 0 5px 0;
 }
+
 </style>
 """, unsafe_allow_html=True)
 
 
-# ==========================================
-# DATA STORAGE
-# ==========================================
+# =====================================================
+# DATA
+# =====================================================
 
 def load_data():
+
     if DATA_FILE.exists():
+
         try:
-            with open(DATA_FILE, "r", encoding="utf-8") as file:
-                return json.load(file)
+            with open(DATA_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+
         except Exception:
             pass
 
     return {
         "messages": [],
-        "memories": [],
-        "tasks": []
+        "memories": []
     }
 
 
 def save_data():
+
     data = {
         "messages": st.session_state.messages,
-        "memories": st.session_state.memories,
-        "tasks": st.session_state.tasks
+        "memories": st.session_state.memories
     }
 
     try:
-        with open(DATA_FILE, "w", encoding="utf-8") as file:
-            json.dump(data, file, indent=2, ensure_ascii=False)
+        with open(DATA_FILE, "w", encoding="utf-8") as f:
+            json.dump(
+                data,
+                f,
+                indent=2,
+                ensure_ascii=False
+            )
+
     except Exception:
         pass
 
 
-if "aura_data_loaded" not in st.session_state:
+if "loaded" not in st.session_state:
+
     saved = load_data()
 
     st.session_state.messages = saved.get("messages", [])
     st.session_state.memories = saved.get("memories", [])
-    st.session_state.tasks = saved.get("tasks", [])
 
-    st.session_state.aura_data_loaded = True
+    st.session_state.loaded = True
+
 
 if "voice_enabled" not in st.session_state:
     st.session_state.voice_enabled = True
@@ -401,22 +470,31 @@ if "voice_enabled" not in st.session_state:
 if "last_audio" not in st.session_state:
     st.session_state.last_audio = None
 
-if "core_state" not in st.session_state:
-    st.session_state.core_state = "idle"
-
 if "subtitle" not in st.session_state:
     st.session_state.subtitle = "Always around you."
 
+if "core_state" not in st.session_state:
+    st.session_state.core_state = "idle"
 
-# ==========================================
-# GEMINI CONNECTION
-# ==========================================
+
+# =====================================================
+# GEMINI
+# =====================================================
 
 def get_api_key():
+
     try:
-        return st.secrets.get("GEMINI_API_KEY") or st.secrets.get("GOOGLE_API_KEY")
+        return (
+            st.secrets.get("GEMINI_API_KEY")
+            or st.secrets.get("GOOGLE_API_KEY")
+        )
+
     except Exception:
-        return os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+
+        return (
+            os.getenv("GEMINI_API_KEY")
+            or os.getenv("GOOGLE_API_KEY")
+        )
 
 
 @st.cache_resource
@@ -424,193 +502,225 @@ def get_client(api_key):
     return genai.Client(api_key=api_key)
 
 
-def get_client_or_error():
-    api_key = get_api_key()
+def get_aura_client():
 
-    if not api_key:
-        st.error(
-            "Aura's Gemini key has not been configured. "
-            "Add GEMINI_API_KEY in your app's Secrets."
-        )
+    key = get_api_key()
+
+    if not key:
+        st.error("Aura's Gemini API key is missing from Streamlit Secrets.")
         return None
 
     try:
-        return get_client(api_key)
+        return get_client(key)
+
     except Exception as error:
-        st.error(f"Could not connect to Gemini: {error}")
+        st.error(f"Connection error: {error}")
         return None
 
 
-# ==========================================
-# TIME AND GREETING
-# ==========================================
+# =====================================================
+# MEMORY
+# =====================================================
 
-def get_greeting():
-    hour = datetime.now().hour
+def get_memory_context():
 
-    if hour < 12:
-        return "Good morning"
-    elif hour < 17:
-        return "Good afternoon"
-    return "Good evening"
-
-
-def get_clock():
-    return datetime.now().strftime("%H:%M:%S")
-
-
-# ==========================================
-# AURA MEMORY CONTEXT
-# ==========================================
-
-def memory_context():
-    memories = st.session_state.memories[-20:]
+    memories = st.session_state.memories[-25:]
 
     if not memories:
-        return "No saved personal notes yet."
+        return "No saved memories."
 
-    return "\n".join(f"- {item}" for item in memories)
+    return "\n".join(
+        "- " + memory for memory in memories
+    )
 
 
-# ==========================================
-# CHAT RESPONSE
-# ==========================================
+# =====================================================
+# CHAT INTELLIGENCE
+# =====================================================
 
-def ask_aura(user_message):
-    client = get_client_or_error()
+def ask_aura(user_text):
+
+    client = get_aura_client()
 
     if client is None:
-        return "I can't connect to my intelligence system right now."
+        return "I'm unable to connect to my intelligence system right now."
 
-    recent_messages = st.session_state.messages[-16:]
+    history = []
 
-    conversation = []
+    for message in st.session_state.messages[-16:]:
 
-    for message in recent_messages:
         role = "User" if message["role"] == "user" else "Aura"
-        conversation.append(f"{role}: {message['content']}")
 
-    conversation_text = "\n".join(conversation)
+        history.append(
+            f"{role}: {message['content']}"
+        )
 
     prompt = f"""
 {SYSTEM_PROMPT}
 
-SAVED USER NOTES:
-{memory_context()}
+SAVED MEMORY:
+{get_memory_context()}
 
 RECENT CONVERSATION:
-{conversation_text}
+{chr(10).join(history)}
 
 NEW MESSAGE:
-User: {user_message}
+{user_text}
 
-Respond as Aura.
+Respond naturally as Aura.
 """
 
     try:
+
         response = client.models.generate_content(
             model=CHAT_MODEL,
             contents=prompt
         )
 
-        answer = response.text
+        if response.text:
+            return response.text.strip()
 
-        if not answer:
-            return "I received an empty response. Please try again."
-
-        return answer.strip()
+        return "I didn't receive a usable response. Please try again."
 
     except Exception as error:
+
         return (
-            "I encountered a connection problem while thinking. "
-            f"Technical detail: {error}"
+            "I encountered a problem while processing that request. "
+            f"Technical information: {error}"
         )
 
 
-# ==========================================
-# TEXT TO SPEECH
-# ==========================================
+# =====================================================
+# AURA'S FEMALE VOICE
+# =====================================================
 
 def generate_speech(text):
-    client = get_client_or_error()
+
+    client = get_aura_client()
 
     if client is None:
         return None
 
+    voice_direction = """
+    Audio Profile:
+    A mature feminine voice with a neutral English accent.
+    Medium-low pitch, warm, smooth and naturally rich.
+    Elegant, composed, confident and charismatic.
+    Clear articulation and measured natural pacing.
+    Natural pauses and subtle warmth.
+    Never robotic, childish or excessively cheerful.
+
+    Director's Notes:
+    Speak as an advanced personal intelligence assistant.
+    Sound calm, polished and effortlessly confident.
+    """
+
     try:
-        response = client.models.generate_content(
+
+        interaction = client.interactions.create(
+
             model=TTS_MODEL,
-            contents=text,
-            config=types.GenerateContentConfig(
-                response_modalities=["AUDIO"],
-                speech_config=types.SpeechConfig(
-                    voice_config=types.VoiceConfig(
-                        prebuilt_voice_config=types.PrebuiltVoiceConfig(
-                            voice_name=AURA_VOICE
-                        )
-                    )
-                )
-            )
+
+            input=[
+                {
+                    "type": "user_input",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": text,
+                            "annotations": [
+                                {
+                                    "type": "speech_metadata",
+                                    "style": voice_direction
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ],
+
+            response_format={
+                "type": "audio"
+            },
+
+            generation_config={
+                "speech_config": [
+                    {
+                        "voice": AURA_VOICE
+                    }
+                ]
+            }
         )
 
-        for part in response.parts:
-            if part.inline_data:
-                return part.inline_data.data
+        audio_data = interaction.output_audio.data
 
-        return None
+        if isinstance(audio_data, str):
+            return base64.b64decode(audio_data)
+
+        return audio_data
 
     except Exception as error:
-        st.warning(f"Voice generation is unavailable: {error}")
+
+        st.warning(
+            f"Aura's voice service is currently unavailable: {error}"
+        )
+
         return None
 
 
-# ==========================================
+# =====================================================
 # AUDIO TRANSCRIPTION
-# ==========================================
+# =====================================================
 
 def transcribe_audio(audio_file):
-    client = get_client_or_error()
+
+    client = get_aura_client()
 
     if client is None:
         return None
 
     try:
+
         audio_bytes = audio_file.getvalue()
 
-        mime_type = audio_file.type or "audio/wav"
-
         response = client.models.generate_content(
+
             model=CHAT_MODEL,
+
             contents=[
-                "Transcribe the spoken words in this audio. "
-                "Return only the transcription.",
-                types.Part.from_bytes(
-                    data=audio_bytes,
-                    mime_type=mime_type
-                )
+                "Transcribe this recording. Return only the spoken words.",
+
+                {
+                    "inline_data": {
+                        "mime_type": audio_file.type or "audio/wav",
+                        "data": base64.b64encode(audio_bytes).decode("utf-8")
+                    }
+                }
             ]
         )
 
         return response.text.strip() if response.text else None
 
     except Exception as error:
-        st.error(f"I couldn't understand that recording: {error}")
+
+        st.error(f"Audio transcription failed: {error}")
         return None
 
 
-# ==========================================
-# MESSAGE HANDLING
-# ==========================================
+# =====================================================
+# MESSAGE PROCESSING
+# =====================================================
 
-def process_message(user_message):
-    user_message = user_message.strip()
+def process_message(user_text):
 
-    if not user_message:
+    user_text = user_text.strip()
+
+    if not user_text:
         return
 
     st.session_state.messages.append({
         "role": "user",
-        "content": user_message,
+        "content": user_text,
         "id": str(uuid.uuid4())
     })
 
@@ -618,7 +728,7 @@ def process_message(user_message):
     st.session_state.subtitle = "Processing your request..."
 
     with st.spinner("Aura is thinking..."):
-        answer = ask_aura(user_message)
+        answer = ask_aura(user_text)
 
     st.session_state.messages.append({
         "role": "assistant",
@@ -630,20 +740,23 @@ def process_message(user_message):
     st.session_state.core_state = "speaking"
 
     if st.session_state.voice_enabled:
+
         audio = generate_speech(answer)
 
         if audio:
             st.session_state.last_audio = audio
 
     st.session_state.core_state = "idle"
+
     save_data()
 
 
-# ==========================================
+# =====================================================
 # SIDEBAR
-# ==========================================
+# =====================================================
 
 with st.sidebar:
+
     st.markdown(
         '<div class="aura-brand">AURA</div>',
         unsafe_allow_html=True
@@ -653,64 +766,58 @@ with st.sidebar:
 
     st.divider()
 
-    st.markdown("### System controls")
+    st.markdown("### Voice settings")
 
     st.session_state.voice_enabled = st.toggle(
-        "Voice replies",
+        "Enable spoken replies",
         value=st.session_state.voice_enabled
     )
 
     if st.button("New conversation", use_container_width=True):
+
         st.session_state.messages = []
         st.session_state.last_audio = None
         st.session_state.subtitle = "A fresh conversation."
+
         save_data()
         st.rerun()
 
     st.divider()
 
-    st.markdown("### Conversation history")
+    st.markdown("### Saved memories")
 
-    if st.session_state.messages:
-        for message in st.session_state.messages[-8:]:
-            if message["role"] == "user":
-                st.caption("YOU")
-            else:
-                st.caption("AURA")
-
-            st.write(message["content"][:180])
-    else:
-        st.caption("No conversations yet.")
-
-    st.divider()
-
-    st.markdown("### Saved memory")
-
-    if st.session_state.memories:
-        for memory in st.session_state.memories:
-            st.write("• " + memory)
-    else:
-        st.caption("No saved notes yet.")
+    for memory in st.session_state.memories:
+        st.write("• " + memory)
 
     new_memory = st.text_input(
-        "Add a memory",
-        placeholder="Something Aura should remember..."
+        "Add something Aura should remember",
+        placeholder="Enter a memory..."
     )
 
     if st.button("Save memory", use_container_width=True):
+
         if new_memory.strip():
-            st.session_state.memories.append(new_memory.strip())
+
+            st.session_state.memories.append(
+                new_memory.strip()
+            )
+
             save_data()
             st.rerun()
 
     st.divider()
 
-    st.caption("AURA SYSTEM • DEVELOPMENT BUILD")
+    st.markdown("### System information")
+
+    st.caption("PERSONALITY: AURA")
+    st.caption("VOICE: GACRUX")
+    st.caption("INTERFACE: HOLOGRAPHIC")
+    st.caption("INTELLIGENCE: GEMINI")
 
 
-# ==========================================
+# =====================================================
 # MAIN HEADER
-# ==========================================
+# =====================================================
 
 st.markdown(
     '<div class="aura-brand">AURA</div>'
@@ -719,136 +826,146 @@ st.markdown(
 )
 
 st.markdown(
-    '<div class="status-line">AURA ONLINE • SYSTEM READY</div>',
+    '<div class="status-line">AURA ONLINE • PERSONAL INTELLIGENCE</div>',
     unsafe_allow_html=True
 )
 
 
-# ==========================================
-# HUD PANELS
-# ==========================================
+# =====================================================
+# TOP HUD PANELS
+# =====================================================
 
-left, center, right = st.columns([1, 2, 1])
+left, middle, right = st.columns([1, 1, 1])
 
 with left:
+
     st.markdown(f"""
     <div class="hud-panel">
-        <div class="hud-label">Local system time</div>
-        <div class="hud-value">{get_clock()}</div>
-        <div class="hud-small">Device time</div>
+        <div class="hud-label">Local time</div>
+        <div class="hud-value">{datetime.now().strftime("%H:%M")}</div>
+        <div class="hud-small">System clock</div>
     </div>
     """, unsafe_allow_html=True)
 
-with center:
+with middle:
+
     st.markdown("""
     <div class="hud-panel" style="text-align:center;">
-        <div class="hud-label">System status</div>
-        <div class="hud-value">ALL SYSTEMS READY</div>
-        <div class="hud-small">Gemini intelligence connection</div>
+        <div class="hud-label">Intelligence system</div>
+        <div class="hud-value">READY</div>
+        <div class="hud-small">Awaiting interaction</div>
     </div>
     """, unsafe_allow_html=True)
 
 with right:
+
     st.markdown(f"""
     <div class="hud-panel">
         <div class="hud-label">Date</div>
         <div class="hud-value">{datetime.now().strftime("%d %b %Y")}</div>
-        <div class="hud-small">Local device date</div>
+        <div class="hud-small">System date</div>
     </div>
     """, unsafe_allow_html=True)
 
 
-# ==========================================
-# AURA CORE
-# ==========================================
+# =====================================================
+# CENTRAL GLOWING CORE
+# ALWAYS CENTRED IN THE MAIN INTERFACE
+# =====================================================
 
 state = st.session_state.core_state
 
 state_class = {
-    "idle": "state-idle",
-    "listening": "state-listening",
-    "thinking": "state-thinking",
-    "speaking": "state-speaking"
-}.get(state, "state-idle")
+    "idle": "",
+    "listening": "core-listening",
+    "thinking": "core-thinking",
+    "speaking": "core-speaking"
+}.get(state, "")
 
 st.markdown(f"""
-<div class="core-wrap">
+<div class="core-stage">
+
     <div class="core {state_class}">
+
         <div class="halo"></div>
-        <div class="ring one"></div>
-        <div class="ring two"></div>
-        <div class="ring three"></div>
-        <div class="ring four"></div>
-        <div class="core-center"></div>
+
+        <div class="ring ring-one"></div>
+
+        <div class="ring ring-two"></div>
+
+        <div class="ring ring-three"></div>
+
+        <div class="ring ring-four"></div>
+
+        <div class="core-light"></div>
+
     </div>
+
 </div>
 """, unsafe_allow_html=True)
 
-state_label = {
+
+# =====================================================
+# CORE STATUS AND SUBTITLES
+# =====================================================
+
+state_labels = {
     "idle": "STANDBY",
     "listening": "LISTENING",
-    "thinking": "PROCESSING",
+    "thinking": "THINKING",
     "speaking": "SPEAKING"
-}.get(state, "STANDBY")
+}
 
 st.markdown(
-    f'<div class="status-line">{state_label}</div>',
+    f'<div class="status-line">{state_labels.get(state, "STANDBY")}</div>',
     unsafe_allow_html=True
 )
 
-subtitle = html.escape(st.session_state.subtitle)
-
 st.markdown(
-    f'<div class="subtitle">{subtitle}</div>',
+    f'<div class="subtitle">{st.session_state.subtitle}</div>',
     unsafe_allow_html=True
 )
 
 
-# ==========================================
+# =====================================================
 # QUICK ACTIONS
-# ==========================================
+# =====================================================
 
 st.markdown(
     '<div class="section-label">QUICK ACCESS</div>',
     unsafe_allow_html=True
 )
 
-action1, action2, action3 = st.columns(3)
+a, b, c = st.columns(3)
 
-with action1:
-    schedule_clicked = st.button(
-        "◷  Schedule",
-        use_container_width=True
-    )
+with a:
+    schedule = st.button("◷ Schedule", use_container_width=True)
 
-with action2:
-    search_clicked = st.button(
-        "⌕  Search",
-        use_container_width=True
-    )
+with b:
+    search = st.button("⌕ Search", use_container_width=True)
 
-with action3:
-    devices_clicked = st.button(
-        "⌘  Devices",
-        use_container_width=True
-    )
+with c:
+    devices = st.button("⌘ Devices", use_container_width=True)
 
-if schedule_clicked:
+if schedule:
     process_message("Help me organise my schedule.")
+    st.rerun()
 
-if search_clicked:
-    process_message("Help me research something. Ask what I want to search for.")
+if search:
+    process_message("Help me research something. Ask what I want to find.")
+    st.rerun()
 
-if devices_clicked:
+if devices:
     process_message(
-        "Explain what device integrations are available. "
+        "Explain which device integrations are available. "
         "Do not claim to control devices that are not connected."
     )
+    st.rerun()
 
 
-# ==========================================
-# CHAT HISTORY
-# ==========================================
+# =====================================================
+# CONVERSATION
+# =====================================================
 
 st.markdown(
     '<div class="section-label">CONVERSATION</div>',
@@ -856,24 +973,26 @@ st.markdown(
 )
 
 for message in st.session_state.messages:
+
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
 
-# ==========================================
-# TEXT INPUT
-# ==========================================
+# =====================================================
+# TEXT CHAT
+# =====================================================
 
 user_prompt = st.chat_input("Speak to Aura...")
 
 if user_prompt:
+
     process_message(user_prompt)
     st.rerun()
 
 
-# ==========================================
+# =====================================================
 # VOICE INPUT
-# ==========================================
+# =====================================================
 
 st.markdown(
     '<div class="section-label">VOICE CHANNEL</div>',
@@ -881,37 +1000,45 @@ st.markdown(
 )
 
 st.caption(
-    "Record a message and Aura will transcribe and respond. "
-    "Microphone access is required."
+    "Record a voice message. Aura will transcribe it and respond."
 )
 
-audio_input = st.audio_input("Speak to Aura")
+audio_input = st.audio_input(
+    "Record a message for Aura",
+    key="aura_microphone"
+)
 
 if audio_input is not None:
-    audio_id = (
-        str(audio_input.size)
-        + str(audio_input.type)
-    )
 
-    if st.session_state.get("processed_audio_id") != audio_id:
+    audio_hash = hashlib.sha256(
+        audio_input.getvalue()
+    ).hexdigest()
+
+    if st.session_state.get("processed_audio_hash") != audio_hash:
+
         st.session_state.core_state = "listening"
 
-        with st.spinner("Listening to your message..."):
+        with st.spinner("Aura is listening..."):
+
             transcription = transcribe_audio(audio_input)
 
-        st.session_state.processed_audio_id = audio_id
+        st.session_state.processed_audio_hash = audio_hash
 
         if transcription:
-            st.success("You said: " + transcription)
+
+            st.success("Transcription: " + transcription)
+
             process_message(transcription)
+
             st.rerun()
 
 
-# ==========================================
-# AUDIO REPLY
-# ==========================================
+# =====================================================
+# SPOKEN RESPONSE
+# =====================================================
 
 if st.session_state.last_audio:
+
     st.markdown(
         '<div class="section-label">AURA VOICE RESPONSE</div>',
         unsafe_allow_html=True
@@ -924,13 +1051,13 @@ if st.session_state.last_audio:
     )
 
 
-# ==========================================
+# =====================================================
 # FOOTER
-# ==========================================
+# =====================================================
 
 st.markdown("""
 <div class="footer">
-    A U R A &nbsp; • &nbsp; PERSONAL INTELLIGENCE
+    A U R A
     <br><br>
     ALWAYS AROUND YOU
 </div>
