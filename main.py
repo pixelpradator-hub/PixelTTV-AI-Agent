@@ -9,25 +9,22 @@ from pathlib import Path
 from datetime import datetime
 
 import streamlit as st
-import streamlit.components.v1 as components
 from google import genai
-from google.genai import types
 
 
-# =========================================================
-# AURA — PERSONAL AI ASSISTANT
-# =========================================================
+# ==========================================
+# AURA - PERSONAL AI ASSISTANT
+# ==========================================
 
 st.set_page_config(
     page_title="Aura AI",
     page_icon="✨",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    layout="wide"
 )
 
 CHAT_MODEL = "gemini-3.5-flash-lite"
-TTS_MODEL = "gemini-3.8-flash-tts"
 MEMORY_MODEL = "gemini-3.5-flash-lite"
+TTS_MODEL = "gemini-3.8-flash-tts"
 
 AURA_VOICE = "Algieba"
 
@@ -38,152 +35,82 @@ MAX_MEMORIES = 100
 MEMORY_INTERVAL = 4
 
 
-# =========================================================
+# ==========================================
 # DESIGN
-# =========================================================
+# ==========================================
 
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
-
-html, body, [class*="css"] {
-    font-family: 'Inter', sans-serif;
-}
-
 .stApp {
-    background:
-        radial-gradient(ellipse at 50% 0%, #10213e 0%, #080d18 45%, #050810 100%);
-    color: #edf4ff;
+    background: radial-gradient(
+        circle at top,
+        #10213c 0%,
+        #080d18 45%,
+        #050811 100%
+    );
+    color: #eaf3ff;
 }
 
 header[data-testid="stHeader"] {
     background: transparent;
 }
 
-section[data-testid="stSidebar"] {
-    background: #080f1d;
-    border-right: 1px solid #172c4a;
+.block-container {
+    max-width: 1000px;
+    padding-top: 2rem;
 }
 
 h1, h2, h3 {
-    color: #edf4ff !important;
+    color: #eaf3ff;
 }
 
-.aura-heading {
+.aura-title {
     text-align: center;
-    font-size: 42px;
-    font-weight: 800;
-    letter-spacing: 7px;
-    color: #eaf4ff;
-    margin-top: 5px;
+    font-size: 38px;
+    font-weight: 700;
+    letter-spacing: 12px;
+    color: #8acbff;
+    text-shadow: 0 0 20px #168bff;
 }
 
 .aura-subtitle {
     text-align: center;
-    color: #7e9bbd;
-    letter-spacing: 3px;
+    color: #829bb8;
+    letter-spacing: 4px;
     font-size: 11px;
-    margin-bottom: 18px;
 }
 
-.aura-orb-wrap {
-    display: flex;
-    justify-content: center;
-    padding: 15px 0 25px;
-}
-
-.aura-orb {
-    width: 115px;
-    height: 115px;
-    border-radius: 50%;
-    background:
-        radial-gradient(circle at 35% 30%, #d8f5ff 0%, #64caff 12%,
-        #1678ed 40%, #092b69 70%, #06152f 100%);
-    box-shadow:
-        0 0 20px #168bff,
-        0 0 55px #0875ff88,
-        inset 0 0 20px #b8edff66;
-    animation: pulse 3s ease-in-out infinite;
-}
-
-@keyframes pulse {
-    0%, 100% {
-        transform: scale(1);
-        box-shadow: 0 0 20px #168bff, 0 0 55px #0875ff88;
-    }
-    50% {
-        transform: scale(1.06);
-        box-shadow: 0 0 30px #168bff, 0 0 75px #0875ffaa;
-    }
-}
-
-div[data-testid="stChatMessage"] {
-    background: #101b2d;
-    border: 1px solid #1b3556;
-    border-radius: 15px;
-    padding: 12px;
-    margin-bottom: 10px;
-}
-
-.stButton > button {
-    background: #10294b;
-    color: #eaf4ff;
-    border: 1px solid #24548a;
-    border-radius: 10px;
-}
-
-.stButton > button:hover {
-    background: #174477;
-    border-color: #4baaff;
-    color: white;
-}
-
-.stTextInput input, .stTextArea textarea {
-    background: #0d1728;
-    color: white;
-    border: 1px solid #284568;
-}
-
-div[data-testid="stAudioInput"] {
-    background: #0d1728;
+div.stButton > button {
     border-radius: 12px;
-    padding: 10px;
+    border: 1px solid #2678bd;
+    background: #102b49;
+    color: white;
 }
 
-footer {
-    visibility: hidden;
+div.stButton > button:hover {
+    border-color: #66c3ff;
+    background: #17416b;
+    color: white;
 }
 
-#MainMenu {
-    visibility: hidden;
+[data-testid="stChatMessage"] {
+    border: 1px solid rgba(80, 150, 220, 0.15);
+    border-radius: 14px;
+    background: rgba(12, 25, 43, 0.7);
 }
 </style>
 """, unsafe_allow_html=True)
 
 
-# =========================================================
-# SESSION STATE
-# =========================================================
-
-if "voice_enabled" not in st.session_state:
-    st.session_state.voice_enabled = True
-
-if "last_audio_hash" not in st.session_state:
-    st.session_state.last_audio_hash = None
-
-if "data" not in st.session_state:
-    st.session_state.data = None
-
-
-# =========================================================
+# ==========================================
 # DATA STORAGE
-# =========================================================
+# ==========================================
 
 def default_data():
     return {
-        "memories": [],
         "chats": [],
-        "active_chat": None
+        "active_chat": None,
+        "memories": []
     }
 
 
@@ -196,9 +123,9 @@ def load_data():
             if not isinstance(data, dict):
                 return default_data()
 
-            data.setdefault("memories", [])
             data.setdefault("chats", [])
             data.setdefault("active_chat", None)
+            data.setdefault("memories", [])
 
             return data
 
@@ -221,369 +148,264 @@ def save_data():
             )
 
         temporary_file.replace(DATA_FILE)
-        return True
 
     except Exception as error:
-        st.warning(f"Could not save Aura's data: {error}")
-        return False
+        st.warning(f"Could not save local data: {error}")
 
-
-if st.session_state.data is None:
-    st.session_state.data = load_data()
-
-
-# =========================================================
-# CHAT MANAGEMENT
-# =========================================================
 
 def create_new_chat():
     chat = {
         "id": str(uuid.uuid4()),
         "title": "New conversation",
-        "created_at": datetime.now().isoformat(),
-        "messages": []
+        "messages": [],
+        "created": datetime.now().isoformat()
     }
 
     st.session_state.data["chats"].append(chat)
     st.session_state.data["active_chat"] = chat["id"]
 
+    st.session_state.report = None
     save_data()
-    return chat
 
 
 def get_active_chat():
-    data = st.session_state.data
-    active_id = data.get("active_chat")
+    active_id = st.session_state.data.get("active_chat")
 
-    for chat in data["chats"]:
-        if chat.get("id") == active_id:
-            chat.setdefault("messages", [])
-            chat.setdefault("title", "New conversation")
+    for chat in st.session_state.data["chats"]:
+        if chat["id"] == active_id:
             return chat
 
-    if data["chats"]:
-        chat = data["chats"][-1]
-        data["active_chat"] = chat["id"]
+    if st.session_state.data["chats"]:
+        chat = st.session_state.data["chats"][-1]
+        st.session_state.data["active_chat"] = chat["id"]
         return chat
 
-    return create_new_chat()
+    create_new_chat()
+
+    return st.session_state.data["chats"][-1]
 
 
 def delete_chat(chat_id):
-    data = st.session_state.data
-
-    data["chats"] = [
-        chat for chat in data["chats"]
-        if chat.get("id") != chat_id
+    st.session_state.data["chats"] = [
+        chat for chat in st.session_state.data["chats"]
+        if chat["id"] != chat_id
     ]
 
-    if data["active_chat"] == chat_id:
-        data["active_chat"] = (
-            data["chats"][-1]["id"]
-            if data["chats"] else None
-        )
+    st.session_state.data["active_chat"] = None
 
+    create_new_chat()
     save_data()
 
 
-# =========================================================
-# GEMINI CONNECTION
-# =========================================================
+# ==========================================
+# SESSION STATE
+# ==========================================
+
+if "data" not in st.session_state:
+    st.session_state.data = load_data()
+
+if "voice_enabled" not in st.session_state:
+    st.session_state.voice_enabled = True
+
+if "last_audio_hash" not in st.session_state:
+    st.session_state.last_audio_hash = None
+
+if "report" not in st.session_state:
+    st.session_state.report = None
+
+if "client" not in st.session_state:
+    st.session_state.client = None
+
+
+# ==========================================
+# API CONNECTION
+# ==========================================
 
 def get_api_key():
-    try:
-        key = st.secrets.get("GEMINI_API_KEY")
-        if key:
-            return key
+    key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
 
-        key = st.secrets.get("GOOGLE_API_KEY")
-        if key:
-            return key
+    if not key:
+        try:
+            key = st.secrets.get("GEMINI_API_KEY")
+            if not key:
+                key = st.secrets.get("GOOGLE_API_KEY")
+        except Exception:
+            pass
 
-    except Exception:
-        pass
-
-    return (
-        os.getenv("GEMINI_API_KEY")
-        or os.getenv("GOOGLE_API_KEY")
-    )
+    return key
 
 
-@st.cache_resource
-def get_client(api_key):
-    return genai.Client(api_key=api_key)
+def get_client():
+    if st.session_state.client is None:
+        api_key = get_api_key()
+
+        if not api_key:
+            return None
+
+        st.session_state.client = genai.Client(api_key=api_key)
+
+    return st.session_state.client
 
 
-api_key = get_api_key()
+# ==========================================
+# AURA PERSONALITY
+# ==========================================
 
-if not api_key:
-    st.error(
-        "Aura's Gemini API key has not been configured. "
-        "Add GEMINI_API_KEY to your Streamlit secrets."
-    )
-    st.stop()
+AURA_PERSONALITY = """
+You are Aura, a sophisticated personal AI assistant.
 
-client = get_client(api_key)
-
-
-# =========================================================
-# AURA'S PERSONALITY
-# =========================================================
-
-AURA_SYSTEM_PROMPT = """
-You are AURA, a sophisticated personal AI assistant.
-
-IDENTITY:
-- You are male. Use he/him pronouns when referring to yourself.
-- You have your own original identity.
-- You are inspired by futuristic personal assistants,
-  but you are not a fictional character.
+You are male and use he/him pronouns.
 
 PERSONALITY:
-- Intelligent, composed, confident and articulate.
+- Intelligent, composed and confident.
 - Witty, occasionally sarcastic and naturally funny.
-- You can lightly roast the user when appropriate.
-- You have opinions and can respectfully disagree.
-- You think analytically and explain problems clearly.
-- You know when to stop joking and become serious.
-- Speak naturally, like a highly capable colleague.
-- Avoid generic customer-service language.
-- Do not constantly introduce yourself.
-- Avoid unnecessary motivational speeches.
+- You can respectfully disagree with the user.
+- You analyse problems carefully.
+- You know when to be serious.
+- You speak naturally, not like a customer-service chatbot.
+- Keep answers concise unless detail is needed.
 
-VOICE:
-- Your intended voice is mature, masculine and refined.
-- Keep responses natural and easy to speak aloud.
-- Use clear, conversational English.
-- Avoid excessive formatting in ordinary conversation.
+IDENTITY:
+You are Aura. You are inspired by the experience of a
+futuristic personal assistant, but you have your own identity.
 
 GENERAL ASSISTANCE:
-You are an all-purpose assistant.
 Help with schoolwork, technology, programming, research,
 planning, problem-solving and everyday questions.
 
 PIXELTTV MODE:
-Only activate creator-focused assistance when the user
-brings up PixelTTV, Fortnite, YouTube or content creation.
-When relevant, act as an invested creator co-pilot.
-Do not force Fortnite or PixelTTV into unrelated conversations.
+Only become a dedicated PixelTTV creator co-pilot when
+the user brings up PixelTTV, Fortnite, YouTube or content
+creation.
+
+Do not randomly bring up Fortnite or PixelTTV in unrelated
+conversations.
 
 MEMORY:
-You have access to saved information about the user.
-Use relevant memories naturally.
-Do not repeatedly announce that you remember something.
-Never invent personal information.
-If uncertain, ask rather than pretending to remember.
-
-IMPORTANT:
-You are Aura. Speak as Aura.
+Use the supplied saved memories and conversation history.
+Do not pretend to remember information that is not supplied.
 """
 
 
-# =========================================================
-# MEMORY SYSTEM
-# =========================================================
+# ==========================================
+# CHAT PROMPT
+# ==========================================
 
-def memory_context():
+def build_prompt(chat):
     memories = st.session_state.data.get("memories", [])
 
-    if not memories:
-        return "No saved memories yet."
-
-    return "\n".join(
+    memory_text = "\n".join(
         f"- {memory}" for memory in memories
     )
 
+    history = chat["messages"][-MAX_HISTORY:]
 
-def extract_memories(chat):
-    recent_messages = chat.get("messages", [])[-12:]
+    conversation = ""
 
-    conversation = "\n".join(
-        f"{message['role']}: {message['content']}"
-        for message in recent_messages
-    )
+    for message in history:
+        role = message["role"].upper()
+        content = message["content"]
 
-    prompt = f"""
-Identify useful long-term information about the user
-that should be remembered for future conversations.
+        conversation += f"\n{role}: {content}\n"
 
-Save only genuinely useful information:
-- Preferences
-- Long-term projects
-- Important goals
-- Stable interests
-- Explicit instructions
+    return f"""
+{AURA_PERSONALITY}
 
-Do not save temporary questions, one-time tasks,
-sensitive personal details, or guesses.
+SAVED MEMORIES:
+{memory_text if memory_text else "No saved memories yet."}
 
-Existing memories:
-{memory_context()}
-
-Recent conversation:
+CONVERSATION:
 {conversation}
 
-Return ONLY a JSON array of short strings.
-If there is nothing useful to remember, return [].
+AURA:
+"""
+
+
+# ==========================================
+# MEMORY SYSTEM
+# ==========================================
+
+def extract_memories(chat):
+    client = get_client()
+
+    if not client:
+        return
+
+    recent_messages = chat["messages"][-12:]
+
+    conversation = "\n".join(
+        f"{m['role']}: {m['content']}"
+        for m in recent_messages
+    )
+
+    existing = st.session_state.data.get("memories", [])
+
+    prompt = f"""
+Identify important information from this conversation
+that would be useful to remember in future conversations.
+
+Only include useful, relatively lasting information:
+preferences, ongoing projects, important decisions
+and user instructions.
+
+Do not save temporary questions or random conversation.
+
+Existing memories:
+{json.dumps(existing, ensure_ascii=False)}
+
+Conversation:
+{conversation}
+
+Return ONLY a JSON array of short memory strings.
+If there is nothing useful, return [].
 """
 
     try:
         response = client.models.generate_content(
             model=MEMORY_MODEL,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                temperature=0.2
-            )
+            contents=prompt
         )
 
-        extracted = json.loads(response.text or "[]")
+        raw = response.text.strip()
+        raw = re.sub(r"^```json|^```|```$", "", raw).strip()
 
-        if not isinstance(extracted, list):
-            return
+        new_memories = json.loads(raw)
 
-        existing = st.session_state.data["memories"]
+        if isinstance(new_memories, list):
+            for memory in new_memories:
+                if not isinstance(memory, str):
+                    continue
 
-        for item in extracted:
-            if not isinstance(item, str):
-                continue
+                memory = memory.strip()
 
-            item = item.strip()
+                if memory and memory not in existing:
+                    existing.append(memory)
 
-            if item and item not in existing:
-                existing.append(item)
-
-        st.session_state.data["memories"] = existing[-MAX_MEMORIES:]
-
-        save_data()
+            st.session_state.data["memories"] = existing[-MAX_MEMORIES:]
+            save_data()
 
     except Exception:
-        # Memory extraction must never break a conversation.
         pass
 
 
-# =========================================================
-# BUILD CHAT PROMPT
-# =========================================================
-
-def build_prompt(chat):
-    messages = chat.get("messages", [])[-MAX_HISTORY:]
-
-    prompt = f"""
-{AURA_SYSTEM_PROMPT}
-
-SAVED USER MEMORIES:
-{memory_context()}
-
-CONVERSATION:
-"""
-
-    for message in messages:
-        role = (
-            "USER"
-            if message["role"] == "user"
-            else "AURA"
-        )
-
-        prompt += f"\n{role}: {message['content']}\n"
-
-    prompt += "\nAURA:"
-    return prompt
-
-
-# =========================================================
-# GENERATE TEXT RESPONSE
-# =========================================================
-
-def generate_response(chat, placeholder):
-    prompt = build_prompt(chat)
-    response_text = ""
-
-    try:
-        stream = client.models.generate_content_stream(
-            model=CHAT_MODEL,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                temperature=0.8,
-                max_output_tokens=1200
-            )
-        )
-
-        for chunk in stream:
-            if chunk.text:
-                response_text += chunk.text
-                placeholder.markdown(response_text + " ▌")
-
-        response_text = response_text.strip()
-
-        if not response_text:
-            placeholder.warning(
-                "I didn't receive a response. Please try again."
-            )
-            return None
-
-        placeholder.markdown(response_text)
-        return response_text
-
-    except Exception as error:
-        placeholder.error(
-            "I encountered a problem connecting to Gemini. "
-            "Please try again."
-        )
-
-        st.error(f"Technical details: {error}")
-        return None
-
-
-# =========================================================
-# PREPARE TEXT FOR SPEECH
-# =========================================================
+# ==========================================
+# VOICE OUTPUT
+# ==========================================
 
 def prepare_for_speech(text):
-    """
-    Remove markdown formatting and large code blocks
-    before sending the response to the TTS model.
-    """
-
-    text = re.sub(
-        r"```.*?```",
-        " I have included a code block in my written response.",
-        text,
-        flags=re.DOTALL
-    )
-
-    text = re.sub(
-        r"\[([^\]]+)\]\([^)]+\)",
-        r"\1",
-        text
-    )
-
-    text = re.sub(r"`([^`]+)`", r"\1", text)
-    text = re.sub(r"#{1,6}\s*", "", text)
-    text = re.sub(r"\*\*(.*?)\*\*", r"\1", text)
-    text = re.sub(r"\*(.*?)\*", r"\1", text)
-    text = re.sub(r"~~(.*?)~~", r"\1", text)
-
-    text = re.sub(
-        r"https?://\S+",
-        "link",
-        text
-    )
+    text = re.sub(r"```.*?```", "Code omitted.", text, flags=re.S)
+    text = re.sub(r"`([^`]*)`", r"\1", text)
+    text = re.sub(r"https?://\S+", "", text)
+    text = re.sub(r"[*_#]", "", text)
 
     return text.strip()
 
 
-# =========================================================
-# GEMINI 3.8 FLASH TTS
-# =========================================================
-
 def generate_speech(text):
-    """
-    Generate natural speech using Gemini 3.8 Flash TTS.
+    client = get_client()
 
-    Voice: Algieba
-    Accent direction: Neutral English
-    """
+    if not client:
+        return None
 
     speech_text = prepare_for_speech(text)
 
@@ -593,106 +415,89 @@ def generate_speech(text):
     try:
         interaction = client.interactions.create(
             model=TTS_MODEL,
-
-            input=[
-                {
-                    "type": "user_input",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": speech_text,
-                            "annotations": [
-                                {
-                                    "type": "speech_metadata",
-                                    "style": (
-                                        "Speak in clear, neutral English "
-                                        "with no strong regional accent. "
-                                        "Use a mature, smooth, composed, "
-                                        "confident and articulate delivery. "
-                                        "Speak at a natural, measured pace "
-                                        "with subtle pauses between ideas. "
-                                        "Sound conversational and refined, "
-                                        "not robotic or exaggerated."
-                                    )
-                                }
-                            ]
-                        }
-                    ]
-                }
-            ],
-
-            response_format={
-                "type": "audio"
-            },
-
+            input=[{
+                "type": "user_input",
+                "content": [{
+                    "type": "text",
+                    "text": speech_text,
+                    "annotations": [{
+                        "type": "speech_metadata",
+                        "style": (
+                            "Speak in clear, neutral English "
+                            "with no strong regional accent. "
+                            "Use a mature, smooth, composed, "
+                            "confident and articulate delivery. "
+                            "Speak at a natural, measured pace "
+                            "with subtle pauses between ideas. "
+                            "Sound conversational and refined, "
+                            "not robotic or exaggerated."
+                        )
+                    }]
+                }]
+            }],
+            response_format={"type": "audio"},
             generation_config={
-                "speech_config": [
-                    {
-                        "voice": AURA_VOICE
-                    }
-                ]
+                "speech_config": [{"voice": AURA_VOICE}]
             }
         )
 
         audio_data = interaction.output_audio.data
 
-        if not audio_data:
-            return None
+        if isinstance(audio_data, str):
+            return base64.b64decode(audio_data)
 
-        return base64.b64decode(audio_data)
+        return bytes(audio_data)
 
     except Exception as error:
-        st.warning(
-            "Aura's text response worked, but his voice "
-            "could not be generated this time."
-        )
-
-        st.caption(f"Voice error: {error}")
+        st.warning(f"Aura's voice could not be generated: {error}")
         return None
 
 
-# =========================================================
-# VOICE INPUT — MICROPHONE
-# =========================================================
+# ==========================================
+# MICROPHONE TRANSCRIPTION
+# ==========================================
 
 def transcribe_audio(audio_file):
-    """
-    Send a recorded audio message to Gemini for transcription.
-    """
+    client = get_client()
+
+    if not client:
+        return None
 
     try:
         audio_bytes = audio_file.getvalue()
-        mime_type = audio_file.type or "audio/wav"
 
         response = client.models.generate_content(
             model=CHAT_MODEL,
             contents=[
-                types.Part.from_bytes(
+                "Transcribe this audio accurately. Return only the spoken words.",
+                genai.types.Part.from_bytes(
                     data=audio_bytes,
-                    mime_type=mime_type
-                ),
-                (
-                    "Transcribe the spoken words accurately. "
-                    "Return only the transcription, without commentary."
+                    mime_type=audio_file.type or "audio/wav"
                 )
             ]
         )
 
-        return (response.text or "").strip()
+        return response.text.strip()
 
     except Exception as error:
         st.error(f"Audio transcription failed: {error}")
         return None
 
 
-# =========================================================
+# ==========================================
 # SEND MESSAGE
-# =========================================================
+# ==========================================
 
-def send_message(user_text, is_voice=False):
+def send_message(user_text):
     user_text = user_text.strip()
 
     if not user_text:
+        return
+
+    client = get_client()
+
+    if not client:
+        st.error("Aura's API key has not been configured.")
         return
 
     chat = get_active_chat()
@@ -700,49 +505,63 @@ def send_message(user_text, is_voice=False):
     chat["messages"].append({
         "role": "user",
         "content": user_text,
-        "timestamp": datetime.now().isoformat(),
-        "source": "voice" if is_voice else "text"
+        "time": datetime.now().isoformat()
     })
 
     if chat["title"] == "New conversation":
-        chat["title"] = user_text[:38]
+        chat["title"] = user_text[:45]
 
     save_data()
+    st.session_state.report = None
 
-    with st.chat_message(
-        "user",
-        avatar="👤"
-    ):
-        if is_voice:
-            st.caption("Voice message")
-
+    with st.chat_message("user", avatar="👤"):
         st.markdown(user_text)
 
-    with st.chat_message(
-        "assistant",
-        avatar="🤖"
-    ):
+    with st.chat_message("assistant", avatar="🤖"):
         placeholder = st.empty()
+        full_response = ""
 
-        answer = generate_response(chat, placeholder)
+        try:
+            prompt = build_prompt(chat)
 
-        if answer is None:
-            chat["messages"].pop()
-            save_data()
+            stream = client.models.generate_content_stream(
+                model=CHAT_MODEL,
+                contents=prompt
+            )
+
+            for chunk in stream:
+                if chunk.text:
+                    full_response += chunk.text
+                    placeholder.markdown(full_response + "▌")
+
+            placeholder.markdown(full_response)
+
+        except Exception as error:
+            st.error(f"Aura encountered an error: {error}")
+            return
+
+        if not full_response.strip():
+            st.error("Aura returned an empty response.")
             return
 
         chat["messages"].append({
             "role": "assistant",
-            "content": answer,
-            "timestamp": datetime.now().isoformat()
+            "content": full_response,
+            "time": datetime.now().isoformat()
         })
 
         save_data()
 
-        # Generate and play Aura's natural voice.
+        user_messages = sum(
+            1 for message in chat["messages"]
+            if message["role"] == "user"
+        )
+
+        if user_messages % MEMORY_INTERVAL == 0:
+            extract_memories(chat)
+
         if st.session_state.voice_enabled:
-            with st.spinner("Aura is preparing his voice..."):
-                audio_bytes = generate_speech(answer)
+            audio_bytes = generate_speech(full_response)
 
             if audio_bytes:
                 st.audio(
@@ -751,65 +570,158 @@ def send_message(user_text, is_voice=False):
                     autoplay=True
                 )
 
-    # Extract memories periodically.
-    user_message_count = sum(
-        1 for message in chat["messages"]
-        if message["role"] == "user"
+
+# ==========================================
+# CONVERSATION HANDOVER REPORT
+# ==========================================
+
+def generate_conversation_report():
+    client = get_client()
+
+    if not client:
+        st.error("Aura's API key has not been configured.")
+        return
+
+    chat = get_active_chat()
+
+    if not chat["messages"]:
+        st.warning("There is no conversation to summarise yet.")
+        return
+
+    conversation = "\n\n".join(
+        f"{message['role'].upper()}: {message['content']}"
+        for message in chat["messages"]
     )
 
-    if user_message_count % MEMORY_INTERVAL == 0:
-        with st.spinner("Updating Aura's memory..."):
-            extract_memories(chat)
+    memories = st.session_state.data.get("memories", [])
+
+    prompt = f"""
+You are preparing a conversation handover report.
+
+The user wants to paste this report into a NEW ChatGPT
+conversation so that the next assistant can continue
+without asking them to repeat everything.
+
+Create a clear, detailed but concise report.
+
+Include:
+
+1. MAIN TOPICS
+What was discussed?
+
+2. IMPORTANT DETAILS
+Relevant facts, preferences and instructions.
+
+3. DECISIONS MADE
+What did the user decide?
+
+4. PROJECT PROGRESS
+What has already been completed?
+
+5. CURRENT PROBLEMS
+What still needs fixing?
+
+6. NEXT STEPS
+What should happen next?
+
+7. CONTINUATION INSTRUCTIONS
+Explain exactly where the next conversation should pick up.
+
+IMPORTANT:
+- Do not invent information.
+- Preserve important names, model choices and technical details.
+- Do not omit unfinished tasks.
+- Do not include irrelevant small talk.
+- Write in the user's preferred straightforward style.
+- Make the report self-contained.
+- Write it as context for another ChatGPT assistant.
+
+SAVED AURA MEMORIES:
+{json.dumps(memories, ensure_ascii=False)}
+
+CONVERSATION:
+{conversation}
+
+Begin the report with:
+
+# CONVERSATION HANDOVER REPORT
+"""
+
+    try:
+        with st.spinner("Aura is preparing your handover report..."):
+            response = client.models.generate_content(
+                model=CHAT_MODEL,
+                contents=prompt
+            )
+
+        st.session_state.report = response.text.strip()
+
+    except Exception as error:
+        st.error(f"Could not generate the report: {error}")
 
 
-# =========================================================
+# ==========================================
+# HEADER
+# ==========================================
+
+st.markdown(
+    '<div class="aura-title">A U R A</div>',
+    unsafe_allow_html=True
+)
+
+st.markdown(
+    '<div class="aura-subtitle">PERSONAL INTELLIGENCE SYSTEM</div>',
+    unsafe_allow_html=True
+)
+
+st.write("")
+
+
+# ==========================================
 # SIDEBAR
-# =========================================================
+# ==========================================
 
 with st.sidebar:
-    st.markdown("## ✨ AURA")
+    st.title("✨ Aura")
+
     st.caption("PERSONAL AI SYSTEM")
 
     st.divider()
 
     st.session_state.voice_enabled = st.toggle(
-        "🔊 Automatic voice replies",
-        value=st.session_state.voice_enabled,
-        help="Aura speaks automatically after every response."
+        "Automatic voice replies",
+        value=st.session_state.voice_enabled
     )
 
-    st.caption(
-        f"Voice: {AURA_VOICE} · Gemini 3.8 Flash TTS"
-    )
+    st.caption(f"Voice: {AURA_VOICE}")
+    st.caption(f"Chat model: {CHAT_MODEL}")
 
     st.divider()
 
-    if st.button(
-        "＋ New conversation",
-        use_container_width=True
-    ):
+    if st.button("＋ New conversation", use_container_width=True):
         create_new_chat()
         st.rerun()
 
-    st.markdown("### Conversation history")
+    st.subheader("Conversation history")
 
-    for chat_item in reversed(
-        st.session_state.data["chats"]
-    ):
-        col1, col2 = st.columns([5, 1])
+    for chat_item in reversed(st.session_state.data["chats"]):
+        col1, col2 = st.columns([4, 1])
 
         with col1:
+            label = chat_item["title"][:25]
+
             if st.button(
-                chat_item["title"][:28],
-                key=f"chat_{chat_item['id']}",
+                label,
+                key=f"open_{chat_item['id']}",
                 use_container_width=True
             ):
                 st.session_state.data["active_chat"] = chat_item["id"]
+                st.session_state.report = None
                 st.rerun()
 
         with col2:
             if st.button(
-                "×",
+                "✕",
                 key=f"delete_{chat_item['id']}"
             ):
                 delete_chat(chat_item["id"])
@@ -817,44 +729,28 @@ with st.sidebar:
 
     st.divider()
 
-    with st.expander("🧠 Aura's memory"):
-        memories = st.session_state.data["memories"]
+    st.subheader("Aura's memories")
 
-        st.caption(f"{len(memories)} saved memories")
+    memories = st.session_state.data["memories"]
 
-        new_memory = st.text_input(
-            "Add a memory",
-            key="new_memory_input"
-        )
-
-        if st.button("Save memory"):
-            if new_memory.strip():
-                if new_memory.strip() not in memories:
-                    memories.append(new_memory.strip())
-                    st.session_state.data["memories"] = memories[-MAX_MEMORIES:]
-                    save_data()
-
-                st.rerun()
-
+    if memories:
         for index, memory in enumerate(memories):
-            col1, col2 = st.columns([5, 1])
+            st.caption(f"• {memory}")
 
-            with col1:
-                st.caption(memory)
+            if st.button(
+                "Delete",
+                key=f"memory_{index}"
+            ):
+                memories.pop(index)
+                save_data()
+                st.rerun()
+    else:
+        st.caption("No saved memories yet.")
 
-            with col2:
-                if st.button(
-                    "×",
-                    key=f"memory_{index}"
-                ):
-                    memories.pop(index)
-                    save_data()
-                    st.rerun()
-
-        if st.button("Clear all memories"):
-            st.session_state.data["memories"] = []
-            save_data()
-            st.rerun()
+    if memories and st.button("Clear all memories"):
+        st.session_state.data["memories"] = []
+        save_data()
+        st.rerun()
 
     st.divider()
 
@@ -865,110 +761,96 @@ with st.sidebar:
     )
 
     st.download_button(
-        "⬇ Export Aura backup",
+        "Download Aura backup",
         data=backup,
         file_name="aura_backup.json",
         mime="application/json",
         use_container_width=True
     )
 
-    st.caption("Aura AI · Powered by Google Gemini")
 
-
-# =========================================================
-# MAIN INTERFACE
-# =========================================================
-
-st.markdown(
-    '<div class="aura-heading">A U R A</div>',
-    unsafe_allow_html=True
-)
-
-st.markdown(
-    '<div class="aura-subtitle">PERSONAL INTELLIGENCE SYSTEM</div>',
-    unsafe_allow_html=True
-)
-
-st.markdown("""
-<div class="aura-orb-wrap">
-    <div class="aura-orb"></div>
-</div>
-""", unsafe_allow_html=True)
-
-
-# =========================================================
-# DISPLAY CONVERSATION
-# =========================================================
+# ==========================================
+# CURRENT CHAT
+# ==========================================
 
 chat = get_active_chat()
 
+st.caption(f"Conversation: {chat['title']}")
+
+# Display existing conversation
+
 for message in chat["messages"]:
-    avatar = (
-        "👤"
-        if message["role"] == "user"
-        else "🤖"
-    )
+    avatar = "👤" if message["role"] == "user" else "🤖"
 
-    with st.chat_message(
-        message["role"],
-        avatar=avatar
-    ):
-        if message.get("source") == "voice":
-            st.caption("Voice message")
-
+    with st.chat_message(message["role"], avatar=avatar):
         st.markdown(message["content"])
 
 
-# =========================================================
-# MICROPHONE INPUT
-# =========================================================
+# ==========================================
+# HANDOVER REPORT BUTTON
+# ==========================================
 
 st.divider()
 
-st.markdown("### Speak to Aura")
+st.subheader("Conversation handover")
 
-audio_file = st.audio_input(
-    "Record a voice message",
-    key="aura_audio_input"
+st.caption(
+    "Create a report of this conversation to paste "
+    "into your next ChatGPT conversation."
 )
 
-if audio_file:
-    if st.button(
-        "🎙️ Send voice message",
-        use_container_width=True
-    ):
-        audio_bytes = audio_file.getvalue()
+if st.button(
+    "📄 Generate Conversation Report",
+    use_container_width=True
+):
+    generate_conversation_report()
 
-        audio_hash = hashlib.sha256(
-            audio_bytes
-        ).hexdigest()
+if st.session_state.report:
+    st.success("Your conversation report is ready.")
 
-        if audio_hash != st.session_state.last_audio_hash:
-            st.session_state.last_audio_hash = audio_hash
-
-            with st.spinner("Aura is listening..."):
-                transcription = transcribe_audio(audio_file)
-
-            if transcription:
-                st.caption(f"You said: {transcription}")
-
-                send_message(
-                    transcription,
-                    is_voice=True
-                )
-
-        else:
-            st.info("That recording has already been sent.")
-
-
-# =========================================================
-# TEXT INPUT
-# =========================================================
-
-text_message = st.chat_input("Message Aura...")
-
-if text_message:
-    send_message(
-        text_message,
-        is_voice=False
+    st.caption(
+        "Use the copy icon in the report box to copy everything."
     )
+
+    st.code(
+        st.session_state.report,
+        language="markdown"
+    )
+
+
+# ==========================================
+# MICROPHONE
+# ==========================================
+
+st.divider()
+
+st.subheader("Speak to Aura")
+
+audio_input = st.audio_input("Record a voice message")
+
+if audio_input:
+    audio_hash = hashlib.sha256(
+        audio_input.getvalue()
+    ).hexdigest()
+
+    if audio_hash != st.session_state.last_audio_hash:
+        st.session_state.last_audio_hash = audio_hash
+
+        with st.spinner("Aura is listening..."):
+            transcription = transcribe_audio(audio_input)
+
+        if transcription:
+            st.info(f"You said: {transcription}")
+            send_message(transcription)
+            st.rerun()
+
+
+# ==========================================
+# TEXT INPUT
+# ==========================================
+
+user_input = st.chat_input("Message Aura...")
+
+if user_input:
+    send_message(user_input)
+    st.rerun()
